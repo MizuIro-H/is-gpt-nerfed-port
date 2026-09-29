@@ -4,7 +4,7 @@ English · [简体中文](README.zh-CN.md)
 
 A community desktop port of [kiyoakii/is-gpt-nerfed](https://github.com/kiyoakii/is-gpt-nerfed), with a Python/PySide6 window and system tray for Windows and Linux. It reads Codex session records and uses ModelTrace probes to compare the requested model with a statistical fingerprint of its answers.
 
-This first port release implements basic functionality. Its core and calibration bank are based on upstream **0.5.2**, commit `f9132f3c8fb9116964e7b5a61052f1aefe73d7be`; it does **not** include upstream 0.5.3 changes. Release `v0.5.2-port.1` identifies the port distribution; the bundled core still reports `0.5.2`.
+This cross-platform release implements basic functionality. Its core and calibration bank are synchronized with upstream **0.5.3**, through commit `ff0d7c04b0ca25308ecb39a7fd24b59e6b62d72c`. Release `v0.5.3-port.1` identifies the port distribution; the bundled core reports `0.5.3`.
 
 ## Download and run
 
@@ -12,12 +12,12 @@ Download portable packages from [this fork's Releases](https://github.com/MizuIr
 
 | Platform | Portable package | Start |
 | --- | --- | --- |
-| Windows 10/11, x64 | `IsGPTNerfed-0.5.2-port.1-windows-x64.zip` | Extract everything, then open `IsGPTNerfed.exe` |
-| Linux, x86_64, glibc 2.35+ | `IsGPTNerfed-0.5.2-port.1-linux-x86_64.tar.gz` or `.zip` | Extract everything, then run `./IsGPTNerfed` |
+| Windows 10/11, x64 | `IsGPTNerfed-0.5.3-port.1-windows-x64.zip` | Extract everything, then open `IsGPTNerfed.exe` |
+| Linux, x86_64, glibc 2.35+ | `IsGPTNerfed-0.5.3-port.1-linux-x86_64.tar.gz` or `.zip` | Extract everything, then run `./IsGPTNerfed` |
 
 Python and Qt are bundled. Keep `_internal/`, `nerfed-core`, `plugin/`, `.agents/`, `licenses/` and, on Windows, `wsl/` beside the application. Moving only the executable breaks the package. Linux needs a graphical desktop and the system libraries listed in the [platform guide](README-CROSSPLATFORM.md); TAR.GZ preserves executable permissions and symbolic links. ZIP extraction tools that discard permissions may require `chmod +x IsGPTNerfed nerfed-core`.
 
-Before extracting, compare the download with `SHA256SUMS.txt`. On Linux use `sha256sum -c SHA256SUMS.txt --ignore-missing`; on Windows use `Get-FileHash .\IsGPTNerfed-0.5.2-port.1-windows-x64.zip -Algorithm SHA256`.
+Before extracting, compare the download with `SHA256SUMS.txt`. On Linux use `sha256sum -c SHA256SUMS.txt --ignore-missing`; on Windows use `Get-FileHash .\IsGPTNerfed-0.5.3-port.1-windows-x64.zip -Algorithm SHA256`.
 
 1. Install and sign in to Codex with plugin hooks and app-server support (upstream tested 0.154).
 2. Open **Settings** and select the Codex home and binary. Windows offers Native or WSL; WSL paths and the Codex executable must belong to the chosen Linux distribution. The WSL runtime requires x86_64 Linux with glibc 2.35+.
@@ -59,15 +59,15 @@ This builds in Ubuntu 22.04, runs source tests and offline GUI/core smoke checks
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1
 ```
 
-The script downloads project-local uv and Python, installs the pinned dependencies, builds and tests the Windows program, and produces `Windows/dist/IsGPTNerfed-0.5.2-windows-x64.zip` plus its checksum. To use another matching WSL archive, pass `-LinuxCoreArchive "C:\path\nerfed-core-linux-x86_64.tar.gz"`. Build filenames use the core version; Release filenames additionally identify the port revision.
+The script downloads project-local uv and Python, installs the pinned dependencies, builds and tests the Windows program, and produces `Windows/dist/IsGPTNerfed-0.5.3-windows-x64.zip` plus its checksum. To use another matching WSL archive, pass `-LinuxCoreArchive "C:\path\nerfed-core-linux-x86_64.tar.gz"`. Build filenames use the core version; Release filenames additionally identify the port revision.
 
-Alternatively run **Actions → Build cross-platform desktop packages → Run workflow** in this fork. It builds Linux first and passes the WSL runtime to Windows. Download the two resulting Actions artifacts; this workflow does not publish a Release automatically.
+Alternatively run **Actions → Build cross-platform desktop packages → Run workflow** in this fork. It builds Linux first and passes the WSL runtime to Windows. A manual run produces two downloadable Actions artifacts. Pushing a `v*-port.*` tag also validates both platforms, creates consistently versioned archives and checksums, and publishes the GitHub Release automatically.
 
 ## Repository and limitations
 
 `desktop/`, `plugin/`, `packaging/` and `tests/` are shared source. `Windows/` and `Linux/` are local runnable snapshots and build outputs, ignored by Git. Release archives carry their compiled programs. The original `macos/` source and its [upstream guide](docs/README-upstream.md) are retained; macOS downloads remain in [upstream Releases](https://github.com/kiyoakii/is-gpt-nerfed/releases).
 
-Validation uses isolated demo data and a fake Codex app-server: it checks GUI rendering, frozen-core startup, plugin registration, UTF-8 hooks and detached workers. It does not establish compatibility with every Linux desktop, Windows installation, or live Codex server. This release is unsigned and has no automatic updater. The 0.5.2 core's executable discovery can choose an old Codex on PATH; configure the desired binary explicitly.
+Validation uses isolated demo data and a fake Codex app-server: it checks GUI rendering, frozen-core startup, plugin registration, UTF-8 hooks and detached workers. It does not establish compatibility with every Linux desktop, Windows installation, or live Codex server. This release is unsigned and has no automatic updater. The 0.5.3 core selects the newest discovered Codex binary while continuing to honor an explicitly configured binary.
 
 Session records, model cache and account metadata are read from the selected Codex home. Config, probe records and logs are kept under its `is-gpt-nerfed/` directory; desktop profiles use the platform's per-user config directory. Account metadata is used for a hash and masked address. Active probes are normal remote Codex inference; detection records stay local. Windows/Linux update checks default to off. Updating/uninstalling instructions are in the [platform guide](README-CROSSPLATFORM.md).
 

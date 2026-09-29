@@ -37,7 +37,7 @@ cp README-CROSSPLATFORM.md "$STAGE/README-CROSSPLATFORM.md"
 "$VENV/bin/python" packaging/copy_licenses.py "$VENV" "$STAGE/licenses"
 cp packaging/NOTICE "$STAGE/NOTICE"
 mkdir -p "$DIST_DIR"
-tar -C "$STAGE" -czf "$DIST_DIR"/IsGPTNerfed-0.5.2-linux-x86_64.tar.gz .
+tar -C "$STAGE" -czf "$DIST_DIR"/IsGPTNerfed-0.5.3-linux-x86_64.tar.gz .
 mkdir -p "$BUILD_DIR/wsl"
 cp "$DIST_DIR"/nerfed-core "$BUILD_DIR/wsl/nerfed-core"
 cp -a plugin "$BUILD_DIR/wsl/plugin"
@@ -45,6 +45,6 @@ cp -a .agents "$BUILD_DIR/wsl/.agents"
 cp -a "$STAGE/licenses" "$BUILD_DIR/wsl/licenses"
 cp packaging/NOTICE "$BUILD_DIR/wsl/NOTICE"
 tar -C "$BUILD_DIR/wsl" -czf "$DIST_DIR"/nerfed-core-linux-x86_64.tar.gz .
-(cd "$DIST_DIR" && sha256sum IsGPTNerfed-0.5.2-linux-x86_64.tar.gz > IsGPTNerfed-0.5.2-linux-x86_64.tar.gz.sha256)
+(cd "$DIST_DIR" && sha256sum IsGPTNerfed-0.5.3-linux-x86_64.tar.gz > IsGPTNerfed-0.5.3-linux-x86_64.tar.gz.sha256)
 (cd "$DIST_DIR" && sha256sum nerfed-core-linux-x86_64.tar.gz > nerfed-core-linux-x86_64.tar.gz.sha256)
-echo "Built $(ldd --version | head -1) package: $DIST_DIR/IsGPTNerfed-0.5.2-linux-x86_64.tar.gz"
+echo "Built $(ldd --version | head -1) package: $DIST_DIR/IsGPTNerfed-0.5.3-linux-x86_64.tar.gz"

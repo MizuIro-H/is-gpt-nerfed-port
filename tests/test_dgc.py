@@ -429,12 +429,14 @@ class ForkProbeTests(unittest.TestCase):
         deadline = time.time() + 30
         while time.time() < deadline:
             rows = [r for r in dgc.iter_jsonl(dgc.PROBES_INDEX) if r.get("thread_id") == "main-thread-5"]
-            if rows:
+            # The verdict index is written before the worker clears its session
+            # state. Wait for both writes before checking completion.
+            st = dgc.load_session("main-thread-5")
+            if rows and st["probe_running"] is None:
                 break
             time.sleep(0.3)
         self.assertTrue(rows, "worker did not record a probe")
         self.assertEqual(rows[-1]["verdict"], "MISMATCH")
-        st = dgc.load_session("main-thread-5")
         self.assertFalse(st["requested"])
         self.assertIsNone(st["probe_running"])
         self.assertEqual(len(st["alerts"]), 1)

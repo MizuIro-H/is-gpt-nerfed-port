@@ -122,7 +122,8 @@ class DesktopBoundaryTests(unittest.TestCase):
             os.environ["CODEX_HOME"] = r"\\wsl.localhost\4AgentHarness\home\sample\.codex"
             with mock.patch.object(backend_module.shutil, "which", return_value=None):
                 program, argv, _ = backend._command(["snapshot", "--demo", "--json"])
-            self.assertEqual(program, str(Path(tempfile.gettempdir()) / "nerfed-core.exe"))
+            # Windows TEMP may use an 8.3 alias for the same directory.
+            self.assertEqual(Path(program).resolve(), (Path(tempfile.gettempdir()) / "nerfed-core.exe").resolve())
             self.assertEqual(argv, ["snapshot", "--demo", "--json"])
 
             backend.demo = False

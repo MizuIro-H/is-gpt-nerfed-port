@@ -1,0 +1,8 @@
+# ModelTrace provenance hashes refer to the original bytes. Windows checkout
+# must not translate line endings in the calibrated bank.
+plugin/assets/modeltrace/unified_bank.json -text
+
+# These launchers are also executed inside Linux/WSL from Windows checkouts.
+*.sh text eol=lf
+bin/nerfed text eol=lf
+plugin/skills/is-gpt-nerfed/scripts/nerfed text eol=lf

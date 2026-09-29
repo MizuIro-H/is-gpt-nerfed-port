@@ -86,7 +86,7 @@ def main() -> int:
         if not isinstance(threads, list) or len(threads) != 6:
             raise RuntimeError(f"Expected six synthetic demo threads, got {len(threads) if isinstance(threads, list) else type(threads).__name__}.")
 
-        remote_root = f"{temporary_home}/.local/share/is-gpt-nerfed/runtime/0.5.2-crossplatform"
+        remote_root = f"{temporary_home}/.local/share/is-gpt-nerfed/runtime/0.5.3-crossplatform"
         check = ("set -eu; "
                  f"test -x {remote_root}/nerfed-core; "
                  f"test -f {remote_root}/plugin/assets/modeltrace/unified_bank.json; "

@@ -2,7 +2,7 @@
 
 [项目简介（中文）](README.zh-CN.md) · [English README](README.md) · [Release 下载](https://github.com/MizuIro-H/is-gpt-nerfed-port/releases/latest)
 
-此移植基于上游 [`kiyoakii/is-gpt-nerfed`](https://github.com/kiyoakii/is-gpt-nerfed) commit `f9132f3c8fb9116964e7b5a61052f1aefe73d7be`（0.5.2）。它在原有 `nerfed` 核心外提供 PySide6 桌面界面。目标平台是 Windows 10/11 x64、WSL 2 与 Linux x86_64（glibc 2.35 起）；Windows ZIP 中带有可自动部署到 WSL 的 Linux 核心包。构建使用 Python 3.12、PySide6 6.11.2 和 PyInstaller 6.22.3。
+此移植已同步至上游 [`kiyoakii/is-gpt-nerfed`](https://github.com/kiyoakii/is-gpt-nerfed) commit `ff0d7c04b0ca25308ecb39a7fd24b59e6b62d72c`（0.5.3）。它在原有 `nerfed` 核心外提供 PySide6 桌面界面。目标平台是 Windows 10/11 x64、WSL 2 与 Linux x86_64（glibc 2.35 起）；Windows ZIP 中带有可自动部署到 WSL 的 Linux 核心包。构建使用 Python 3.12、PySide6 6.11.2 和 PyInstaller 6.22.3。
 
 ## 本地目录管理
 
@@ -21,9 +21,9 @@
 
 ## 启动
 
-**Windows：**解压 `IsGPTNerfed-0.5.2-windows-x64.zip` 到一个普通目录，运行 `IsGPTNerfed.exe`。在设置中选择本机 Windows 或目标 WSL 发行版。选择 WSL 后，桌面端会自动从 ZIP 内的 `wsl/nerfed-core-linux.tar.gz` 部署 Linux 核心与插件到该发行版的 `~/.local/share/is-gpt-nerfed/runtime/0.5.2-crossplatform/`；无需手工解压此文件。
+**Windows：**解压 `IsGPTNerfed-0.5.3-windows-x64.zip` 到一个普通目录，运行 `IsGPTNerfed.exe`。在设置中选择本机 Windows 或目标 WSL 发行版。选择 WSL 后，桌面端会自动从 ZIP 内的 `wsl/nerfed-core-linux.tar.gz` 部署 Linux 核心与插件到该发行版的 `~/.local/share/is-gpt-nerfed/runtime/0.5.3-crossplatform/`；无需手工解压此文件。
 
-**Linux：**将 `IsGPTNerfed-0.5.2-linux-x86_64.tar.gz` 解压到用户有写入权限的目录，然后运行 `./IsGPTNerfed`。此构建基于 Ubuntu 22.04 / glibc 2.35；尚未验证低于 glibc 2.35 的发行版。若 Qt 提示缺少系统共享库，请安装下方原生构建步骤列出的 Qt/XCB 依赖；其他发行版使用各自包管理器提供的对应库。可用 `ldd _internal/PySide6/Qt/lib/libQt6XcbQpa.so.6` 查找 `not found` 的库。Release 另外提供 Linux ZIP，若解压丢失执行权限，请运行 `chmod +x IsGPTNerfed nerfed-core`。TAR.GZ 能保留符号链接；请直接在 Linux 解压，不要用 Windows 文件复制去整理 Linux 共享库链接。
+**Linux：**将 `IsGPTNerfed-0.5.3-linux-x86_64.tar.gz` 解压到用户有写入权限的目录，然后运行 `./IsGPTNerfed`。此构建基于 Ubuntu 22.04 / glibc 2.35；尚未验证低于 glibc 2.35 的发行版。若 Qt 提示缺少系统共享库，请安装下方原生构建步骤列出的 Qt/XCB 依赖；其他发行版使用各自包管理器提供的对应库。可用 `ldd _internal/PySide6/Qt/lib/libQt6XcbQpa.so.6` 查找 `not found` 的库。Release 另外提供 Linux ZIP，若解压丢失执行权限，请运行 `chmod +x IsGPTNerfed nerfed-core`。TAR.GZ 能保留符号链接；请直接在 Linux 解压，不要用 Windows 文件复制去整理 Linux 共享库链接。
 
 ## 手动更新
 
@@ -32,13 +32,13 @@
 Linux 校验示例：
 
 ```sh
-sha256sum -c IsGPTNerfed-0.5.2-linux-x86_64.tar.gz.sha256
+sha256sum -c IsGPTNerfed-0.5.3-linux-x86_64.tar.gz.sha256
 ```
 
 Windows PowerShell 校验示例：
 
 ```powershell
-Get-FileHash .\IsGPTNerfed-0.5.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\IsGPTNerfed-0.5.3-windows-x64.zip -Algorithm SHA256
 ```
 
 将输出与 `.sha256` 文件中的十六进制值比较。跨平台构建没有配置自动发布或自动下载更新；通过项目工作流或本地构建拿到新包后手动替换即可。
@@ -59,7 +59,7 @@ Windows 必须在原生 Windows PowerShell 或 PowerShell 7 中构建。脚本�
 
 ```powershell
 New-Item -ItemType Directory -Force .\Linux\dist | Out-Null
-Invoke-WebRequest -Uri "https://github.com/MizuIro-H/is-gpt-nerfed-port/releases/download/v0.5.2-port.1/nerfed-core-linux-x86_64.tar.gz" -OutFile .\Linux\dist\nerfed-core-linux-x86_64.tar.gz
+Invoke-WebRequest -Uri "https://github.com/MizuIro-H/is-gpt-nerfed-port/releases/download/v0.5.3-port.1/nerfed-core-linux-x86_64.tar.gz" -OutFile .\Linux\dist\nerfed-core-linux-x86_64.tar.gz
 ```
 
 核对 Release 的校验文件后构建：
@@ -103,4 +103,4 @@ PyInstaller 包含的许可证文本位于每个包的 `licenses/`，Qt/PySide6 
 
 构建烟测运行冻结核心的版本输出、演示快照、内置 selftest，以及通过临时 fake appserver 发起的一次离线 fork probe；不会连接真实 Codex app-server，也不会修改 Codex 配置。桌面界面另以 Qt offscreen 模式做启动检查。构建包不代表已在所有 Windows/Linux 发行版、桌面环境或显卡驱动上完成兼容性认证。Linux 兼容基线是 Ubuntu 22.04 的 glibc 2.35；Windows 包由 Windows 原生 runner 构建。
 
-卸载时先在设置中关闭“登录时启动”，再对相应 Codex home 执行 `teardown`，它会解除插件/hooks 注册并保留账本。例如 Windows 本机在解压目录运行 PowerShell 命令 `& (Join-Path $PWD 'nerfed-core.exe') teardown`，Linux 从解压目录运行 `./nerfed-core teardown`；WSL 则在选定发行版里对已部署的 `~/.local/share/is-gpt-nerfed/runtime/0.5.2-crossplatform/nerfed-core` 执行 `teardown`。确认 Codex 不再引用应用路径后，退出桌面程序并删除解压目录；WSL 用户也可删除该发行版下的 `~/.local/share/is-gpt-nerfed/runtime/`。如确实要清除历史账本，必须显式运行 `teardown --purge`；这会删除记录，不能作为普通卸载步骤。
+卸载时先在设置中关闭“登录时启动”，再对相应 Codex home 执行 `teardown`，它会解除插件/hooks 注册并保留账本。例如 Windows 本机在解压目录运行 PowerShell 命令 `& (Join-Path $PWD 'nerfed-core.exe') teardown`，Linux 从解压目录运行 `./nerfed-core teardown`；WSL 则在选定发行版里对已部署的 `~/.local/share/is-gpt-nerfed/runtime/0.5.3-crossplatform/nerfed-core` 执行 `teardown`。确认 Codex 不再引用应用路径后，退出桌面程序并删除解压目录；WSL 用户也可删除该发行版下的 `~/.local/share/is-gpt-nerfed/runtime/`。如确实要清除历史账本，必须显式运行 `teardown --purge`；这会删除记录，不能作为普通卸载步骤。

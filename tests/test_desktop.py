@@ -184,7 +184,7 @@ class DesktopBoundaryTests(unittest.TestCase):
             shell = argv[-1]
             self.assertEqual(program, "wsl.exe")
             self.assertEqual(argv[:4], ["-d", "4AgentHarness", "--exec", "sh"])
-            self.assertIn('dest="$HOME/.local/share/is-gpt-nerfed/runtime/0.5.2-crossplatform"', shell)
+            self.assertIn('dest="$HOME/.local/share/is-gpt-nerfed/runtime/0.5.3-crossplatform"', shell)
             self.assertIn('NERFED_PLUGIN_ROOT="$dest/plugin"', shell)
             self.assertIn('NERFED_CORE_BIN="$dest/nerfed-core"', shell)
             self.assertNotIn("'$HOME", shell)

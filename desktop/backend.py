@@ -20,7 +20,7 @@ from typing import Callable
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QStandardPaths, Signal
 
 
-APP_VERSION = "0.5.2-crossplatform"
+APP_VERSION = "0.5.3-crossplatform"
 
 
 def app_root() -> Path:

@@ -34,12 +34,12 @@ try:
             raise RuntimeError(f"{[str(exe), *args]} exited {result.returncode}:\n{result.stdout}\n{result.stderr}")
         return result.stdout
 
-    assert "0.5.2" in run("--version")
+    assert "0.5.3" in run("--version")
     marketplace = json.loads((root / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
     assert marketplace["plugins"][0]["source"]["path"] == "./plugin"
     assert (root / "plugin" / ".codex-plugin" / "plugin.json").is_file()
     snapshot = json.loads(run("snapshot", "--demo", "--json"))
-    assert snapshot.get("version") == "0.5.2", snapshot.get("version")
+    assert snapshot.get("version") == "0.5.3", snapshot.get("version")
     assert "PASS" in run("selftest")
     run("config", "init")
     run("config", "set", "codex_bin", str(fake))

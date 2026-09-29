@@ -106,7 +106,7 @@ Invoke-Checked "Windows license collection" $VenvPython @("packaging/copy_licens
 Copy-Item packaging/NOTICE (Join-Path $Stage "NOTICE")
 Copy-Item README-CROSSPLATFORM.md (Join-Path $Stage "README-CROSSPLATFORM.md")
 
-$Archive = Join-Path $Root "Windows\dist\IsGPTNerfed-0.5.2-windows-x64.zip"
+$Archive = Join-Path $Root "Windows\dist\IsGPTNerfed-0.5.3-windows-x64.zip"
 if (Test-Path $Archive) { Remove-Item $Archive -Force }
 Invoke-Checked "Windows ZIP creation" $VenvPython @("packaging/create_zip.py", $Stage, $Archive)
 $null = [Reflection.Assembly]::LoadWithPartialName("System.IO.Compression")

@@ -1,0 +1,18 @@
+# Local runnable packages; distribute these as Release assets, not source.
+/Windows/
+/Linux/
+/dist/
+
+# Build environments, caches and temporary output.
+/.build/
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+/fake_codex.spec
+/macos/build/
+/macos/.build/
+.DS_Store
+*.tmp

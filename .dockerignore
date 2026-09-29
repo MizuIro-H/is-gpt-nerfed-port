@@ -1,0 +1,11 @@
+.git
+.build
+.venv
+.venv-*
+Windows
+Linux
+dist
+__pycache__
+*.pyc
+macos/build
+macos/.build

@@ -1,0 +1,14 @@
+IsGPTNerfed includes bundled Python and Qt components. Component license texts
+are included in the adjacent licenses/ directory when supplied by the package.
+
+PySide6 distributes Qt shared libraries. Qt is available under LGPLv3, GPLv3,
+and a commercial license. This application dynamically links the Qt shared
+libraries; those libraries remain replaceable under the terms of their license.
+The Qt source and licensing information are available at https://www.qt.io/licensing/.
+
+PyInstaller is distributed under the GNU General Public License with a special
+exception allowing distribution of applications created with PyInstaller.
+Its full license text is included in licenses/ when available.
+
+The is-gpt-nerfed plugin and its assets are distributed under the repository
+license and any component-specific notices in the plugin tree.

@@ -1,0 +1,44 @@
+name: Build cross-platform desktop packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-jammy:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and smoke test Linux app and WSL runtime
+        run: bash packaging/build_linux_docker.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-jammy-runtime
+          path: |
+            Linux/dist/IsGPTNerfed-0.5.2-linux-x86_64.tar.gz
+            Linux/dist/IsGPTNerfed-0.5.2-linux-x86_64.tar.gz.sha256
+            Linux/dist/nerfed-core-linux-x86_64.tar.gz
+            Linux/dist/nerfed-core-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
+  windows-native:
+    runs-on: windows-latest
+    needs: linux-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-jammy-runtime
+          path: Linux/dist
+      - name: Build and smoke test Windows ZIP with WSL runtime
+        shell: pwsh
+        run: ./packaging/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-package
+          path: |
+            Windows/dist/IsGPTNerfed-0.5.2-windows-x64.zip
+            Windows/dist/IsGPTNerfed-0.5.2-windows-x64.zip.sha256
+          if-no-files-found: error

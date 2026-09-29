@@ -1,0 +1,105 @@
+{
+  "name": "is-gpt-nerfed",
+  "version": "0.5.2",
+  "description": "Transparent, user-controlled detection of silent model downgrades in Codex sessions: a zero-token passive scan of the session rollout on every turn, plus ModelTrace fingerprint probes run in ephemeral forks of the thread (the mechanism behind /side) on a schedule you choose. Verdicts are delivered as a snarky card.",
+  "author": {
+    "name": "is-gpt-nerfed contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "model routing",
+    "downgrade",
+    "integrity",
+    "transparency",
+    "codex",
+    "justice"
+  ],
+  "skills": "./skills/",
+  "hooks": {
+    "description": "is-gpt-nerfed: passive session-integrity scan, probe scheduling, verdict delivery, optional halt",
+    "hooks": {
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh -c 'P=\"${PLUGIN_ROOT:-}\"; H=\"$P/skills/is-gpt-nerfed/scripts/hook.sh\"; if [ ! -x \"$H\" ]; then N=\"${NERFED_HOME:-${CODEX_HOME:-$HOME/.codex}/is-gpt-nerfed}\"; H=\"$N/plugin/skills/is-gpt-nerfed/scripts/hook.sh\"; fi; [ -x \"$H\" ] || exit 0; sh \"$H\" SessionStart || true; exit 0'",
+              "timeout": 10,
+              "statusMessage": "is-gpt-nerfed: registering session",
+              "commandWindows": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$p=$env:PLUGIN_ROOT; $h=if($p){Join-Path $p 'skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(-not $h -or -not (Test-Path -LiteralPath $h)){$n=$env:NERFED_HOME; if(-not $n){$c=$env:CODEX_HOME; if(-not $c){$c=Join-Path $env:USERPROFILE '.codex'}; $n=Join-Path $c 'is-gpt-nerfed'}; $h=Join-Path $n 'plugin\\skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(Test-Path -LiteralPath $h){try{& $h -Event SessionStart}catch{}}; exit 0\""
+            }
+          ]
+        }
+      ],
+      "UserPromptSubmit": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh -c 'P=\"${PLUGIN_ROOT:-}\"; H=\"$P/skills/is-gpt-nerfed/scripts/hook.sh\"; if [ ! -x \"$H\" ]; then N=\"${NERFED_HOME:-${CODEX_HOME:-$HOME/.codex}/is-gpt-nerfed}\"; H=\"$N/plugin/skills/is-gpt-nerfed/scripts/hook.sh\"; fi; [ -x \"$H\" ] || exit 0; sh \"$H\" UserPromptSubmit || true; exit 0'",
+              "timeout": 10,
+              "additionalContextLimit": 4000,
+              "commandWindows": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$p=$env:PLUGIN_ROOT; $h=if($p){Join-Path $p 'skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(-not $h -or -not (Test-Path -LiteralPath $h)){$n=$env:NERFED_HOME; if(-not $n){$c=$env:CODEX_HOME; if(-not $c){$c=Join-Path $env:USERPROFILE '.codex'}; $n=Join-Path $c 'is-gpt-nerfed'}; $h=Join-Path $n 'plugin\\skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(Test-Path -LiteralPath $h){try{& $h -Event UserPromptSubmit}catch{}}; exit 0\""
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "matcher": ".*",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh -c 'P=\"${PLUGIN_ROOT:-}\"; H=\"$P/skills/is-gpt-nerfed/scripts/hook.sh\"; if [ ! -x \"$H\" ]; then N=\"${NERFED_HOME:-${CODEX_HOME:-$HOME/.codex}/is-gpt-nerfed}\"; H=\"$N/plugin/skills/is-gpt-nerfed/scripts/hook.sh\"; fi; [ -x \"$H\" ] || exit 0; sh \"$H\" PreToolUse || true; exit 0'",
+              "timeout": 5,
+              "additionalContextLimit": 4000,
+              "commandWindows": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$p=$env:PLUGIN_ROOT; $h=if($p){Join-Path $p 'skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(-not $h -or -not (Test-Path -LiteralPath $h)){$n=$env:NERFED_HOME; if(-not $n){$c=$env:CODEX_HOME; if(-not $c){$c=Join-Path $env:USERPROFILE '.codex'}; $n=Join-Path $c 'is-gpt-nerfed'}; $h=Join-Path $n 'plugin\\skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(Test-Path -LiteralPath $h){try{& $h -Event PreToolUse}catch{}}; exit 0\""
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh -c 'P=\"${PLUGIN_ROOT:-}\"; H=\"$P/skills/is-gpt-nerfed/scripts/hook.sh\"; if [ ! -x \"$H\" ]; then N=\"${NERFED_HOME:-${CODEX_HOME:-$HOME/.codex}/is-gpt-nerfed}\"; H=\"$N/plugin/skills/is-gpt-nerfed/scripts/hook.sh\"; fi; [ -x \"$H\" ] || exit 0; sh \"$H\" Stop || true; exit 0'",
+              "timeout": 20,
+              "statusMessage": "is-gpt-nerfed: scanning session for silent downgrades",
+              "commandWindows": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$p=$env:PLUGIN_ROOT; $h=if($p){Join-Path $p 'skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(-not $h -or -not (Test-Path -LiteralPath $h)){$n=$env:NERFED_HOME; if(-not $n){$c=$env:CODEX_HOME; if(-not $c){$c=Join-Path $env:USERPROFILE '.codex'}; $n=Join-Path $c 'is-gpt-nerfed'}; $h=Join-Path $n 'plugin\\skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(Test-Path -LiteralPath $h){try{& $h -Event Stop}catch{}}; exit 0\""
+            }
+          ]
+        }
+      ],
+      "SessionEnd": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh -c 'P=\"${PLUGIN_ROOT:-}\"; H=\"$P/skills/is-gpt-nerfed/scripts/hook.sh\"; if [ ! -x \"$H\" ]; then N=\"${NERFED_HOME:-${CODEX_HOME:-$HOME/.codex}/is-gpt-nerfed}\"; H=\"$N/plugin/skills/is-gpt-nerfed/scripts/hook.sh\"; fi; [ -x \"$H\" ] || exit 0; sh \"$H\" SessionEnd || true; exit 0'",
+              "timeout": 3,
+              "commandWindows": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$p=$env:PLUGIN_ROOT; $h=if($p){Join-Path $p 'skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(-not $h -or -not (Test-Path -LiteralPath $h)){$n=$env:NERFED_HOME; if(-not $n){$c=$env:CODEX_HOME; if(-not $c){$c=Join-Path $env:USERPROFILE '.codex'}; $n=Join-Path $c 'is-gpt-nerfed'}; $h=Join-Path $n 'plugin\\skills\\is-gpt-nerfed\\scripts\\hook.ps1'}; if(Test-Path -LiteralPath $h){try{& $h -Event SessionEnd}catch{}}; exit 0\""
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "interface": {
+    "displayName": "Is GPT nerfed?",
+    "shortDescription": "Catch silent model downgrades in your Codex sessions",
+    "longDescription": "is-gpt-nerfed watches every Codex session for silent model, reasoning-effort and context-window changes (zero tokens), and on a schedule you choose forks the thread ephemerally to run ModelTrace fingerprint probes that attribute the answering model. Results arrive as a card, a macOS notification and a message in the thread. Everything stays on your machine. Fingerprint bank and scorer: github.com/xqy2006/ModelTrace (MIT).",
+    "developerName": "is-gpt-nerfed contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "$is-gpt-nerfed",
+      "Did Codex silently downgrade this session? Use $is-gpt-nerfed.",
+      "/side $is-gpt-nerfed"
+    ],
+    "brandColor": "#E5484D",
+    "logo": "./assets/logo.png"
+  }
+}

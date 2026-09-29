@@ -1,8 +1,0 @@
-__pycache__/
-*.pyc
-.DS_Store
-*.tmp
-.build/
-macos/build/
-macos/.build/
-dist/

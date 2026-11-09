@@ -22,8 +22,10 @@ from PySide6.QtCore import QUrl
 
 try:
     from .backend import Backend
+    from .panel import Panel
 except ImportError:
     from backend import Backend
+    from panel import Panel
 
 
 ZH = QLocale.system().name().lower().startswith("zh")
@@ -223,6 +225,7 @@ class MainWindow(QMainWindow):
         self.last_fresh_heartbeat = 0.0
         self._config_queue: list[tuple[str, str]] = []
         self._closing = False
+        self.panel: Panel | None = None
         self.setWindowTitle(tr("is-gpt-nerfed", "is-gpt-nerfed"))
         self.resize(1020, 700)
         self._build_ui()
@@ -363,18 +366,33 @@ class MainWindow(QMainWindow):
         self.tray.setToolTip("is-gpt-nerfed")
         menu = self.tray.contextMenu() or QMenu()
         show = QAction(tr("Open panel", "打开面板"), self)
-        show.triggered.connect(self.showNormal)
+        show.triggered.connect(lambda: self.show_panel())
+        inspector = QAction(tr("Inspector", "详细窗口"), self)
+        inspector.triggered.connect(lambda: self.open_inspector(None))
         refresh = QAction(tr("Refresh", "刷新"), self)
         refresh.triggered.connect(self.refresh)
         exit_action = QAction(tr("Exit", "退出"), self)
         exit_action.triggered.connect(self.explicit_exit)
         menu.addAction(show)
+        menu.addAction(inspector)
         menu.addAction(refresh)
         menu.addSeparator()
         menu.addAction(exit_action)
         self.tray.setContextMenu(menu)
-        self.tray.activated.connect(lambda reason: self.showNormal() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
+        self.tray.activated.connect(lambda reason: self.show_panel(toggle=True) if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
         self.tray.show()
+
+    def show_panel(self, toggle: bool = False) -> None:
+        if self.panel is None:
+            self.showNormal()
+            return
+        anchor = self.tray.geometry() if self.tray else None
+        if not self.panel.floating:
+            self.panel.show(); self.panel.raise_(); self.panel.activateWindow()
+        elif toggle:
+            self.panel.toggle_at(anchor)
+        else:
+            self.panel.popup(anchor)
 
     @staticmethod
     def _icon_for(status: str) -> QIcon:
@@ -592,11 +610,56 @@ class MainWindow(QMainWindow):
     def probe_selected(self) -> None:
         thread = self._selected_thread()
         if thread:
-            tid = thread["id"]
-            if self.backend.run(["worker", "--thread", tid, "--detach"], key="probe:" + tid, timeout_ms=30000):
-                import time
-                self.pending_probes[tid] = time.time()
-                self._selection_changed()
+            self.probe_thread(thread["id"])
+
+    def probe_thread(self, tid: str) -> None:
+        if self.demo or tid in self.pending_probes:
+            return
+        if self.backend.run(["worker", "--thread", tid, "--detach"], key="probe:" + tid, timeout_ms=30000):
+            import time
+            self.pending_probes[tid] = time.time()
+            self._selection_changed()
+
+    def resume_thread(self, tid: str) -> None:
+        if not self.demo:
+            self.backend.run(["resume", "--thread", tid], key="resume:" + tid, timeout_ms=30000)
+
+    def copy_text(self, text: str) -> None:
+        QApplication.clipboard().setText(text)
+
+    def set_config(self, key: str, value: str) -> None:
+        """Queue one `config set` (the panel's settings page applies each control immediately)."""
+        if self.demo:
+            return
+        self._config_queue = [(k, v) for k, v in self._config_queue if k != key] + [(key, value)]
+        if not any(k.startswith("config:") for k in self.backend.busy):
+            self._start_next_config()
+
+    @staticmethod
+    def autostart_enabled() -> bool:
+        return _autostart_enabled()
+
+    def set_autostart(self, enabled: bool) -> None:
+        if self.demo:
+            return
+        try:
+            _set_autostart(enabled)
+        except Exception as exc:
+            self._show_error(tr("Could not update user startup setting: ", "无法更新用户级自启动：") + str(exc))
+
+    def open_inspector(self, thread_id: str | None = None) -> None:
+        if thread_id:
+            for row in range(self.thread_table.rowCount()):
+                item = self.thread_table.item(row, 0)
+                if item and item.data(Qt.ItemDataRole.UserRole) == thread_id:
+                    self.thread_table.selectRow(row)
+                    break
+            self.tabs.setCurrentIndex(0)
+        if self.panel and self.panel.floating:
+            self.panel.hide()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def retry_selected(self) -> None:
         self.probe_selected()
@@ -751,7 +814,7 @@ class MainWindow(QMainWindow):
         self.app.quit()
 
 
-def run(demo: bool = False, screenshot: str | None = None) -> int:
+def run(demo: bool = False, screenshot: str | None = None, classic: bool = False) -> int:
     app = QApplication(sys.argv[:1])
     app.setApplicationName("is-gpt-nerfed")
     app.setOrganizationName("is-gpt-nerfed")
@@ -759,6 +822,10 @@ def run(demo: bool = False, screenshot: str | None = None) -> int:
     app.setStyle("Fusion")
     backend = Backend(demo=demo)
     win = MainWindow(backend, app)
+    # The macOS-style tray panel is the primary surface; with no tray it is an ordinary
+    # (draggable) window instead of a popover. `classic` keeps the table window up front.
+    panel = Panel(win, floating=win.tray is not None and not screenshot)
+    win.panel = panel
     if screenshot:
         captured = False
         def save_demo_shot(_snap: dict) -> None:
@@ -767,10 +834,18 @@ def run(demo: bool = False, screenshot: str | None = None) -> int:
                 return
             captured = True
             def capture_and_exit() -> None:
-                win.grab().save(screenshot)
+                panel.adjustSize()
+                panel.grab().save(screenshot)
+                base, dot, ext = screenshot.rpartition(".")
+                win.grab().save(f"{base}-inspector.{ext}" if dot else screenshot + "-inspector")
                 app.exit(0)
             QTimer.singleShot(250, capture_and_exit)
         backend.snapshotReady.connect(save_demo_shot)
         QTimer.singleShot(30000, lambda: app.exit(0))
-    win.show()
+    if classic:
+        win.show()
+    elif screenshot or not panel.floating:
+        panel.show()
+    else:
+        QTimer.singleShot(300, win.show_panel)
     return app.exec()

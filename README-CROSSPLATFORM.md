@@ -55,7 +55,7 @@ bash packaging/build_linux_docker.sh
 
 ### 构建 Windows
 
-Windows 必须在原生 Windows PowerShell 或 PowerShell 7 中构建。脚本把 uv、Python 3.12、虚拟环境、PyInstaller 缓存限制在 `.build/`，不改系统 Python 或用户 PATH。先完成 Linux 构建（WSL 核心位于 `Linux/dist/nerfed-core-linux-x86_64.tar.gz`），或者从本 Fork Release 下载相同版本的独立核心包：
+Windows 必须在原生 Windows PowerShell 或 PowerShell 7 中构建。脚本把 uv、Python 3.12、虚拟环境、PyInstaller 缓存限制在 `.build/`，不改系统 Python 或用户 PATH。先完成 Linux 构建（WSL 核心位于 `Linux/dist/nerfed-core-linux-x86_64.tar.gz`）。以下下载命令仅供重建旧版 0.5.2 使用：
 
 ```powershell
 New-Item -ItemType Directory -Force .\Linux\dist | Out-Null

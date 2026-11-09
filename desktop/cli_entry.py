@@ -16,10 +16,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="is-gpt-nerfed desktop inspector")
     parser.add_argument("--demo", action="store_true", help="show synthetic offline data in an isolated temporary home")
     parser.add_argument("--screenshot", help="save the first rendered window image (intended for offline demo review)")
+    parser.add_argument("--classic", action="store_true", help="open the table inspector window at startup instead of the tray panel")
     args, qt_args = parser.parse_known_args()
     # Qt receives only its own arguments; the product intentionally has no CLI mode.
     sys.argv = [sys.argv[0], *qt_args]
-    return run(demo=args.demo, screenshot=args.screenshot)
+    return run(demo=args.demo, screenshot=args.screenshot, classic=args.classic)
 
 
 if __name__ == "__main__":

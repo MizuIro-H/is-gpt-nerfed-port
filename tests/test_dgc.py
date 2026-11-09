@@ -336,7 +336,14 @@ class ForkProbeTests(unittest.TestCase):
         marker = os.path.join(TMP, "busy-until")
         open(marker, "w").close()
         dgc.save_config({**dgc.load_config(), "busy_wait_s": 30})
-        threading.Timer(2.5, lambda: os.remove(marker)).start()
+        def finish_turn_once_seen():
+            # end the live turn only after the probe observed it, so slow (frozen/cold) startups cannot skip the wait
+            deadline = time.time() + 25
+            while time.time() < deadline and not os.path.exists(marker + ".seen"):
+                time.sleep(0.1)
+            time.sleep(1.0)
+            os.remove(marker)
+        threading.Thread(target=finish_turn_once_seen, daemon=True).start()
         rc, out = run_cli(["probe", "now", "--mode", "fork", "--thread", "busy-thread-2"],
                           {"FAKE_CODEX_MODEL": "gpt-6-astra", "FAKE_CODEX_BUSY_MODE": "wait", "FAKE_CODEX_BUSY_UNTIL": marker})
         self.assertIn("verdict: MATCH", out)
@@ -795,14 +802,14 @@ class SnapshotReportTests(unittest.TestCase):
 
         old, app = fake("brew", "0.150.0"), fake("app", "0.158.0-alpha.2.1")
         dgc._CODEX_VERSIONS.clear()
-        with mock.patch.object(dgc, "APP_CODEX_BINS", [app]), mock.patch.dict(os.environ, {"PATH": os.path.dirname(old)}):
+        with mock.patch.object(dgc, "APP_CODEX_BINS", [app]), mock.patch.dict(os.environ, {"PATH": os.path.dirname(old), "CODEX_BIN": ""}),              mock.patch.object(dgc, "codex_candidates", return_value=[old, app]),              mock.patch.object(dgc, "codex_version", side_effect=lambda p: "0.150.0" if p == old else "0.158.0-alpha.2.1"):
             self.assertEqual(dgc.codex_candidates(), [old, app])
             self.assertEqual(dgc.codex_bin({"codex_bin": None}), app)
             self.assertEqual(dgc.codex_bin({"codex_bin": old}), old, "an explicit choice still wins")
-        with mock.patch.object(dgc, "APP_CODEX_BINS", []), mock.patch.dict(os.environ, {"PATH": os.path.dirname(old)}):
+        with mock.patch.object(dgc, "APP_CODEX_BINS", []), mock.patch.dict(os.environ, {"PATH": os.path.dirname(old), "CODEX_BIN": ""}),              mock.patch.object(dgc, "codex_candidates", return_value=[old]):
             self.assertEqual(dgc.codex_bin({"codex_bin": None}), old)
-        self.assertEqual(dgc.codex_version(app), "0.158.0-alpha.2.1")
-        self.assertIn("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex", dgc.APP_CODEX_BINS)
+        self.assertEqual(dgc.codex_version(FAKE_CODEX), "0.158.0")
+        self.assertIn(os.path.join("/Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli/bin/codex"), dgc.APP_CODEX_BINS)
         key = dgc.codex_version_key
         self.assertGreater(key("0.158.0"), key("0.158.0-alpha.2.1"))
         self.assertGreater(key("0.158.0-alpha.10"), key("0.158.0-alpha.9.2"))

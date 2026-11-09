@@ -50,7 +50,10 @@ def busy_now():
         return True
     if mode == "wait":
         p = os.environ.get("FAKE_CODEX_BUSY_UNTIL")
-        return bool(p and os.path.exists(p))
+        if p and os.path.exists(p):
+            open(p + ".seen", "w").close()  # lets the test end the turn only after a client saw it live
+            return True
+        return False
     return False
 
 

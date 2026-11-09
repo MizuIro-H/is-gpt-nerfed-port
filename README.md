@@ -32,7 +32,7 @@ Passive checks read Codex's recorded model, reasoning effort and context-window 
 
 ModelTrace scores those answers against a calibrated, closed-set bank. A match means the answers resemble the requested model; a confident mismatch can be marked downgrade, upgrade or rerouted. Suspicious, unlisted and invalid results need interpretation. The fingerprint is statistical evidence, not proof of the server's actual weights, and an unknown model can resemble a listed one. See the [original upstream guide](docs/README-upstream.md) for verdict definitions, thresholds, scheduling and methodology.
 
-The desktop provides a session list, reports, notifications, manual/retry/fresh probes, plugin setup, hook trust and settings. Windows/Linux updates are **manual**; the original macOS automatic updater is not part of this port.
+Clicking the tray icon opens a panel modelled on the upstream macOS menu-bar popover (face, verdict headline, session rows that expand into their report, fresh-session probe and in-panel settings); **Inspector** opens the table window, and `--classic` starts with it. The desktop provides a session list, reports, notifications, manual/retry/fresh probes, plugin setup, hook trust and settings. Windows/Linux updates are **manual**; the original macOS automatic updater is not part of this port.
 
 ## Build from source
 

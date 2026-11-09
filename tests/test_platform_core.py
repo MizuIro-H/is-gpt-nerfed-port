@@ -21,6 +21,21 @@ loader.exec_module(core)
 
 
 class PlatformCoreTests(unittest.TestCase):
+    def test_windows_codex_candidates_include_exe_and_npm_shim(self):
+        if os.name != "nt":
+            self.skipTest("Windows executable discovery")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            native, shim = root / "codex.exe", root / "codex.cmd"
+            native.touch()
+            shim.touch()
+            with mock.patch.dict(os.environ, {"PATH": td + os.pathsep + td,
+                                               "LOCALAPPDATA": td, "ProgramFiles": td}), \
+                 mock.patch.object(core, "APP_CODEX_BINS", []), \
+                 mock.patch.object(core.shutil, "which", return_value=None), \
+                 mock.patch.object(core.glob, "glob", return_value=[]):
+                self.assertEqual(core.codex_candidates(), [str(native), str(shim)])
+
     def test_sqlite_uri_escapes_special_path_characters(self):
         with tempfile.TemporaryDirectory(prefix="dgc db # ü ") as td:
             home = Path(td)

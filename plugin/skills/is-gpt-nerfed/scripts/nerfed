@@ -19,6 +19,7 @@ State lives under $NERFED_HOME (default: $CODEX_HOME/is-gpt-nerfed, i.e. ~/.code
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import datetime as dt
 try:
@@ -3277,6 +3278,12 @@ def cmd_doctor(args) -> int:
         m = read_json(p, {}) or {}
         hooks = m.get("hooks") or ((m.get("extensions") or {}).get("com.openai") or {}).get("hooks")
         text = json.dumps(hooks) if hooks else ""
+        # Windows launchers may be -EncodedCommand (UTF-16LE base64); look inside them too.
+        for enc in re.findall(r"-EncodedCommand ([A-Za-z0-9+/=]+)", text):
+            try:
+                text += " " + base64.b64decode(enc).decode("utf-16-le")
+            except (ValueError, UnicodeDecodeError):
+                pass
         check(bool(hooks), f"hooks declared in {os.path.relpath(p, PLUGIN_ROOT)}")
         check("hook.sh" in text and "hook.ps1" in text and "commandWindows" in text,
               "hooks use platform launchers with a Windows commandWindows entry")

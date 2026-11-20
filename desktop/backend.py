@@ -5,6 +5,7 @@ the desktop target profile and process boundary; it never edits Codex config.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import hashlib
 import os
@@ -14,6 +15,8 @@ import shlex
 import shutil
 import sys
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +32,12 @@ def app_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def core_bin() -> Path:
+    """返回冻结态核心可执行文件路径。"""
+    name = "nerfed-core.exe" if sys.platform == "win32" else "nerfed-core"
+    return app_root() / name
+
+
 def plugin_root() -> Path:
     root = app_root() / "plugin"
     if root.is_dir():
@@ -36,6 +45,15 @@ def plugin_root() -> Path:
     if getattr(sys, "frozen", False) and (app_root().parent / "plugin").is_dir():
         return app_root().parent / "plugin"
     return root
+
+
+def _decode_output(raw: bytes) -> str:
+    """Decode child output; wsl.exe writes its own errors as UTF-16LE, which would otherwise render as mojibake."""
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", "replace")
+    if len(raw) >= 4 and raw.count(b"\x00") * 3 >= len(raw):
+        return raw.decode("utf-16-le", "replace")
+    return raw.decode("utf-8", "replace")
 
 
 class ProfileStore:
@@ -67,9 +85,26 @@ class ProfileStore:
     def save(self, value: dict) -> None:
         safe = {"kind": value.get("kind", "native"), "distro": value.get("distro", ""),
                 "codex_home": value.get("codex_home", ""), "codex_bin": value.get("codex_bin", "")}
-        temp = self.path.with_suffix(".tmp")
-        temp.write_text(json.dumps(safe, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, self.path)
+        temp = self.path.with_name(f"{self.path.name}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp")
+        with temp.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(safe, ensure_ascii=False, indent=2))
+        replaced = False
+        try:
+            for attempt in range(8):
+                try:
+                    os.replace(temp, self.path)
+                    replaced = True
+                    return
+                except OSError as exc:
+                    winerr = getattr(exc, "winerror", None)
+                    is_transient = sys.platform == "win32" and (isinstance(exc, PermissionError) or winerr in (5, 32))
+                    if not is_transient or attempt + 1 >= 8:
+                        raise
+                    time.sleep(0.015 * (attempt + 1))
+        finally:
+            if not replaced:
+                with contextlib.suppress(OSError):
+                    temp.unlink(missing_ok=True)
 
 
 class Backend(QObject):
@@ -169,7 +204,7 @@ class Backend(QObject):
             # its separately frozen child process.
             env.insert("PYINSTALLER_RESET_ENVIRONMENT", "1")
             if not self.demo:
-                env.insert("NERFED_CORE_BIN", str(app_root() / ("nerfed-core.exe" if sys.platform == "win32" else "nerfed-core")))
+                env.insert("NERFED_CORE_BIN", str(core_bin()))
         env.insert("NERFED_PLUGIN_ROOT", str(plugin_root()))
         try:
             command, argv, extra_env = self._command(args)
@@ -291,8 +326,12 @@ class Backend(QObject):
         return str(path)
 
     def _finished(self, key: str, process: QProcess, code: int) -> None:
-        stdout = bytes(process.readAllStandardOutput()).decode("utf-8", "replace")
-        stderr = bytes(process.readAllStandardError()).decode("utf-8", "replace")
+        stdout = _decode_output(bytes(process.readAllStandardOutput()))
+        stderr = _decode_output(bytes(process.readAllStandardError()))
+        if "WSL_E_DISTRO_NOT_FOUND" in stderr and self.profile.get("kind") == "wsl":
+            # wsl.exe's own message is long and localized; name the profile that points nowhere.
+            stderr = (f"The WSL distro '{self.profile.get('distro', '')}' saved in this app's backend profile no longer exists. "
+                      "Switch the backend to Native (or another distro) in Settings.\n" + stderr)
         if self._active.get(key) is process:
             self._active.pop(key, None)
         if int(process.property("profileGeneration") or 0) != self._generation:

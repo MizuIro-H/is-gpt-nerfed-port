@@ -13,5 +13,6 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="IsGPTNerfed", console=False, upx=False)
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="IsGPTNerfed", console=False, upx=False,
+          icon=str(root / "packaging" / "IsGPTNerfed.ico"))
 coll = COLLECT(exe, a.binaries, a.datas, name="IsGPTNerfed", strip=False, upx=False)

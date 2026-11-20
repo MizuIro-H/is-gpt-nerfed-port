@@ -1,5 +1,5 @@
 param(
-    [string]$LinuxCoreArchive = (Join-Path $PSScriptRoot "..\Linux\dist\nerfed-core-linux-x86_64.tar.gz")
+    [string]$LinuxCoreArchive = (Join-Path $PSScriptRoot "..\dist\nerfed-core-linux-x86_64.tar.gz")
 )
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -100,13 +100,29 @@ Copy-Item (Join-Path $Root "plugin") (Join-Path $Stage "plugin") -Recurse -Force
 Copy-Item (Join-Path $Root ".agents") (Join-Path $Stage ".agents") -Recurse -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $Stage "wsl") | Out-Null
 Copy-Item $LinuxCoreArchive (Join-Path $Stage "wsl\nerfed-core-linux.tar.gz") -Force
+# Windows-only WinUI 3 inspector (self-contained: .NET + Windows App SDK ride along in inspector\).
+$Dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
+if (-not $Dotnet) { throw "The .NET 9 SDK is required to build the WinUI 3 inspector (winget install Microsoft.DotNet.SDK.9)." }
+$InspectorOut = Join-Path $Build "inspector"
+if (Test-Path $InspectorOut) { Remove-Item $InspectorOut -Recurse -Force }
+Invoke-Checked "WinUI inspector publish" $Dotnet @("publish", "windows-ui/Inspector/Inspector.csproj", "-c", "Release",
+    "-r", "win-x64", "--self-contained", "true", "-o", $InspectorOut, "--artifacts-path", (Join-Path $Build "dotnet-artifacts"))
+Copy-Item $InspectorOut (Join-Path $Stage "inspector") -Recurse -Force
+# publish drops the PRI index; the unpackaged WinUI app cannot start without it (see Inspector.csproj).
+if (-not (Test-Path (Join-Path $Stage "inspector\IsGPTNerfed.Inspector.pri"))) {
+    throw "WinUI inspector publish is missing IsGPTNerfed.Inspector.pri (its PRI index)"
+}
+Invoke-Checked "WinUI inspector smoke" $VenvPython @("packaging/inspector_smoke.py", (Join-Path $Stage "inspector\IsGPTNerfed.Inspector.exe"))
 Invoke-Checked "Frozen Windows GUI smoke" $VenvPython @("packaging/gui_smoke.py", (Join-Path $Stage "IsGPTNerfed.exe"))
 Invoke-Checked "Frozen Windows core smoke" $VenvPython @("packaging/smoke.py", (Join-Path $Stage "nerfed-core.exe"), $Stage, (Join-Path $Build "fake-dist\fake_codex.exe"))
 Invoke-Checked "Windows license collection" $VenvPython @("packaging/copy_licenses.py", $Venv, (Join-Path $Stage "licenses"))
 Copy-Item packaging/NOTICE (Join-Path $Stage "NOTICE")
 Copy-Item README-CROSSPLATFORM.md (Join-Path $Stage "README-CROSSPLATFORM.md")
 
-$Archive = Join-Path $Root "Windows\dist\IsGPTNerfed-0.5.3-windows-x64.zip"
+# Everything shippable lands in dist/: the runnable windows\ folder plus release archives.
+$Dist = Join-Path $Root "dist"
+New-Item -ItemType Directory -Force -Path $Dist | Out-Null
+$Archive = Join-Path $Dist "IsGPTNerfed-0.5.3-windows-x64.zip"
 if (Test-Path $Archive) { Remove-Item $Archive -Force }
 Invoke-Checked "Windows ZIP creation" $VenvPython @("packaging/create_zip.py", $Stage, $Archive)
 $null = [Reflection.Assembly]::LoadWithPartialName("System.IO.Compression")
@@ -115,10 +131,14 @@ $ZipCheck = [System.IO.Compression.ZipFile]::OpenRead($Archive)
 try {
     $Names = @($ZipCheck.Entries | ForEach-Object { $_.FullName })
     foreach ($Required in @(".agents/plugins/marketplace.json", "plugin/.codex-plugin/plugin.json",
-                            "wsl/nerfed-core-linux.tar.gz", "nerfed-core.exe", "IsGPTNerfed.exe")) {
+                            "wsl/nerfed-core-linux.tar.gz", "nerfed-core.exe", "IsGPTNerfed.exe",
+                            "inspector/IsGPTNerfed.Inspector.exe", "inspector/IsGPTNerfed.Inspector.pri")) {
         if ($Names -notcontains $Required) { throw "Windows ZIP is missing required entry: $Required" }
     }
 } finally { $ZipCheck.Dispose() }
 $Hash = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -Encoding ascii -NoNewline -Path "$Archive.sha256" -Value "$Hash  $(Split-Path $Archive -Leaf)`n"
+$Runnable = Join-Path $Dist "windows"
+if (Test-Path $Runnable) { Remove-Item $Runnable -Recurse -Force }  # fails loudly if the old copy is still running
+Copy-Item $Stage $Runnable -Recurse -Force
 Write-Output "Built $Archive using managed Python $(& $VenvPython --version)"

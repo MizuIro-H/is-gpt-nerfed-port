@@ -7,8 +7,10 @@ import sys
 root = Path.cwd()
 script_dir = root / "plugin" / "skills" / "is-gpt-nerfed" / "scripts"
 stdlib = set(sys.stdlib_module_names)
-hidden = {"codex_appserver", "modeltrace_core", "simple_term_menu"}
-for filename in [script_dir / "nerfed", script_dir / "codex_appserver.py", script_dir / "modeltrace_core.py"]:
+hidden = {"codex_appserver", "modeltrace_core", "simple_term_menu",
+          "modeltrace_build", "modeltrace_build.builder", "modeltrace_build.challenge_suite"}
+for filename in [script_dir / "nerfed", script_dir / "codex_appserver.py", script_dir / "modeltrace_core.py",
+                 script_dir / "modeltrace_build" / "builder.py"]:
     tree = ast.parse(filename.read_text(encoding="utf-8"), filename=str(filename))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -40,4 +42,5 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="nerfed-core", console=True, upx=False)
+exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="nerfed-core", console=True, upx=False,
+          icon=str(root / "packaging" / "IsGPTNerfed.ico"))

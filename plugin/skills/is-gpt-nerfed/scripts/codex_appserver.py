@@ -10,6 +10,7 @@ through native forks; see plugin/assets/modeltrace/provenance.json.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
@@ -64,8 +65,18 @@ class AppServer:
         args = ([codex_bin] if isinstance(codex_bin, str) else list(codex_bin)) + ["app-server", "--stdio", "-c", "notify=[]"]
         if not hooks_enabled:
             args += ["-c", "features.hooks=false"]
+        kwargs = {}
+        if os.name == "nt":
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = subprocess.SW_HIDE
+            kwargs = {
+                "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                "startupinfo": si,
+            }
         self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL, env=environ, text=True, encoding="utf-8", errors="replace", bufsize=1)
+                                     stderr=subprocess.DEVNULL, env=environ, text=True, encoding="utf-8", errors="replace",
+                                     bufsize=1, **kwargs)
         self._write_lock = threading.Lock()
         self._cond = threading.Condition()
         self._next_id = 0
@@ -161,18 +172,20 @@ class AppServer:
         return result
 
     def close(self) -> None:
-        try:
-            self.proc.stdin.close()
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            if self.proc.stdin:
+                self.proc.stdin.close()
         try:
             self.proc.wait(timeout=2)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 self.proc.kill()
                 self.proc.wait(timeout=3)
-            except Exception:
-                pass
+        with contextlib.suppress(Exception):
+            self._reader.join(timeout=1.0)
+        with contextlib.suppress(Exception):
+            if self.proc.stdout:
+                self.proc.stdout.close()
 
 
 # -- thread helpers -----------------------------------------------------------------------------
@@ -475,9 +488,12 @@ def trust_hooks(codex_bin: str, hooks: list[dict]) -> dict:
         app.close()
 
 
-def start_ephemeral(app: AppServer, model: str, effort: str | None, provider: str | None, cwd: str) -> dict:
+def start_ephemeral(app: AppServer, model: str, effort: str | None, provider: str | None, cwd: str,
+                    developer_instructions: str | None = None) -> dict:
     """Start a brand-new ephemeral thread (no history) with the given model settings."""
     params = {"ephemeral": True, "model": model, "cwd": cwd}
+    if developer_instructions:
+        params["developerInstructions"] = developer_instructions
     if provider:
         params["modelProvider"] = provider
     if effort:

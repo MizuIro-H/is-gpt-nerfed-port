@@ -150,6 +150,80 @@ class PlatformCoreTests(unittest.TestCase):
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertEqual(marker.read_text(encoding="utf-8"), 'SessionStart|{"unicode":"你好"}\n')
 
+    def test_write_json_retries_transient_permission_error_and_cleans_tmp(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "state.json"
+            real_replace = core.os.replace
+            calls = {"count": 0}
+
+            def flaky_replace(src, dst):
+                calls["count"] += 1
+                if calls["count"] < 3:
+                    raise PermissionError(13, "locked")
+                return real_replace(src, dst)
+
+            with mock.patch.object(core.os, "name", "nt"), \
+                 mock.patch.object(core.os, "replace", side_effect=flaky_replace), \
+                 mock.patch.object(core.time, "sleep"):
+                core.write_json(str(target), {"ok": True})
+            self.assertEqual(calls["count"], 3)
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"ok": True})
+            self.assertEqual(list(Path(td).glob("*.tmp")), [])
+
+            with mock.patch.object(core.os, "name", "nt"), \
+                 mock.patch.object(core.os, "replace", side_effect=PermissionError(13, "still locked")), \
+                 mock.patch.object(core.time, "sleep"):
+                with self.assertRaises(PermissionError):
+                    core.write_json(str(target), {"ok": False})
+            self.assertEqual(list(Path(td).glob("*.tmp")), [])
+
+    def test_log_event_and_error_write_valid_lines(self):
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "log.jsonl"
+            err_path = Path(td) / "errors.log"
+            with mock.patch.object(core, "NERFED_HOME", td), \
+                 mock.patch.object(core, "LOG_PATH", str(log_path)), \
+                 mock.patch.object(core, "ERRORS_PATH", str(err_path)):
+                core.log_event("test_kind", count=1, note="你好")
+                core.log_error("boom")
+            rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["kind"], "test_kind")
+            self.assertEqual(rows[0]["note"], "你好")
+            self.assertEqual(rows[1]["kind"], "error")
+            self.assertEqual(rows[1]["level"], "error")
+            self.assertIn("boom", err_path.read_text(encoding="utf-8"))
+
+    def test_default_originator_recognizes_windows_desktop_codex(self):
+        self.assertEqual(
+            core.default_originator(r"C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0\app\resources\codex.exe"),
+            "Codex Desktop",
+        )
+        self.assertEqual(
+            core.default_originator(r"C:\Users\u\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe"),
+            "Codex Desktop",
+        )
+        self.assertEqual(
+            core.default_originator(r"C:\Users\u\AppData\Roaming\npm\codex.cmd"),
+            "codex_cli_rs",
+        )
+
+    def test_windows_detached_options_avoid_blank_console_window(self):
+        if os.name != "nt":
+            self.skipTest("Windows subprocess window flags")
+        detached = core.popen_detached_options()
+        self.assertTrue(detached["creationflags"] & subprocess.CREATE_NO_WINDOW)
+        self.assertFalse(detached["creationflags"] & subprocess.DETACHED_PROCESS)
+        self.assertTrue(detached["creationflags"] & subprocess.CREATE_NEW_PROCESS_GROUP)
+        self.assertTrue(detached["close_fds"])
+        self.assertTrue(detached["startupinfo"].dwFlags & subprocess.STARTF_USESHOWWINDOW)
+        self.assertEqual(detached["startupinfo"].wShowWindow, subprocess.SW_HIDE)
+
+        window_opts = core.subprocess_window_kwargs()
+        self.assertTrue(window_opts["creationflags"] & subprocess.CREATE_NO_WINDOW)
+        self.assertTrue(window_opts["startupinfo"].dwFlags & subprocess.STARTF_USESHOWWINDOW)
+        self.assertEqual(window_opts["startupinfo"].wShowWindow, subprocess.SW_HIDE)
+
 
 if __name__ == "__main__":
     unittest.main()

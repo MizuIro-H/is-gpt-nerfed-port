@@ -22,10 +22,12 @@ from PySide6.QtCore import QUrl
 
 try:
     from .backend import Backend
-    from .panel import Panel
+    from .panel import ASSETS, Panel
+    from .winui_bridge import WinUIInspector, inspector_path
 except ImportError:
     from backend import Backend
-    from panel import Panel
+    from panel import ASSETS, Panel
+    from winui_bridge import WinUIInspector, inspector_path
 
 
 ZH = QLocale.system().name().lower().startswith("zh")
@@ -224,8 +226,12 @@ class MainWindow(QMainWindow):
         self.pending_fresh_at: float | None = None
         self.last_fresh_heartbeat = 0.0
         self._config_queue: list[tuple[str, str]] = []
+        self._settings_dialog: SettingsDialog | None = None
         self._closing = False
         self.panel: Panel | None = None
+        # Windows renders the inspector with WinUI 3 when the bundled view is present; Linux keeps this Qt window.
+        exe = inspector_path()
+        self.winui = WinUIInspector(self, exe, tr, ASSETS / "app-icon.png", fallback=self._open_qt_inspector) if exe else None
         self.setWindowTitle(tr("is-gpt-nerfed", "is-gpt-nerfed"))
         self.resize(1020, 700)
         self._build_ui()
@@ -371,11 +377,14 @@ class MainWindow(QMainWindow):
         inspector.triggered.connect(lambda: self.open_inspector(None))
         refresh = QAction(tr("Refresh", "刷新"), self)
         refresh.triggered.connect(self.refresh)
+        enroll = QAction(tr("Enroll a new model…", "录入新模型指纹…"), self)
+        enroll.triggered.connect(self.enroll_model)
         exit_action = QAction(tr("Exit", "退出"), self)
         exit_action.triggered.connect(self.explicit_exit)
         menu.addAction(show)
         menu.addAction(inspector)
         menu.addAction(refresh)
+        menu.addAction(enroll)
         menu.addSeparator()
         menu.addAction(exit_action)
         self.tray.setContextMenu(menu)
@@ -396,21 +405,10 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _icon_for(status: str) -> QIcon:
-        colors = {"alert": QColor("#c62828"), "warn": QColor("#ed8b00"),
-                  "ok": QColor("#2e7d32"), "upgraded": QColor("#2e7d32"),
-                  "unverified": QColor("#607d8b")}
-        pix = QPixmap(64, 64)
-        pix.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pix)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(colors.get(status, QColor("#546e7a")))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(4, 4, 56, 56)
-        painter.setPen(QColor("white"))
-        font = painter.font(); font.setBold(True); font.setPointSize(32); painter.setFont(font)
-        painter.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "!" if status in ("alert", "warn") else "✓")
-        painter.end()
-        return QIcon(pix)
+        # The upstream chip faces (the panel header's artwork) stand in for the macOS menu-bar text face,
+        # which would be unreadable at tray size: calm normally, worried when suspicious, glaring on a downgrade.
+        name = {"alert": "face-alert", "warn": "face-warn"}.get(status, "face-ok")
+        return QIcon(str(ASSETS / f"{name}.png"))
 
     def refresh(self) -> None:
         if "snapshot" not in self.backend.busy:
@@ -451,6 +449,8 @@ class MainWindow(QMainWindow):
         self.global_report.setPlainText(str(snap.get("global_report_text") or ""))
         self._show_plugin_status(snap)
         self._notify_new_probes(snap)
+        if self.winui:
+            self.winui.push_state()
 
     def _populate_threads(self, threads: list[dict]) -> None:
         current = self.selected_id
@@ -519,7 +519,11 @@ class MainWindow(QMainWindow):
     def _process_started(self, key: str) -> None:
         if key != "snapshot":
             self.setup_status.appendPlainText(f"{key}: {tr('started', '已启动')}")
+            if self.winui:
+                self.winui.log(f"{key}: {tr('started', '已启动')}")
         self._selection_changed()
+        if self.winui:
+            self.winui.push_state()
 
     def _process_finished(self, key: str, code: int, stdout: str, stderr: str) -> None:
         if code != 0 and key == "fresh":
@@ -530,18 +534,54 @@ class MainWindow(QMainWindow):
         if key != "snapshot":
             tail = (stdout or stderr).strip()[-6000:]
             self.setup_status.appendPlainText(f"{key}: {tr('finished', '已结束')} ({code})\n{tail or tr('(no output)', '（无输出）')}")
+            if self.winui:
+                self.winui.log(f"{key}: {tr('finished', '已结束')} ({code})\n{tail or tr('(no output)', '（无输出）')}")
             if code != 0:
                 self._show_error(f"{key} exited with code {code}:\n{(stderr or stdout).strip()[-2000:]}")
+            if key.startswith("enroll:") and code == 0:
+                self.refresh()  # the snapshot and later probes now read the rebuilt bank
             if key.startswith("config:"):
                 if code == 0:
                     self._start_next_config()
                 else:
                     self._config_queue.clear()
         self._selection_changed()
+        if self.winui:
+            self.winui.push_state()
+
+    def _unlisted_model(self) -> str:
+        """The declared model of the newest UNLISTED probe, to prefill the enrollment prompt."""
+        snap = self.snapshot_data or {}
+        for probe in list(snap.get("recent_probes") or []) + list(snap.get("global_probes") or []):
+            if isinstance(probe, dict) and probe.get("verdict") == "UNLISTED" and probe.get("expected"):
+                return str(probe["expected"])
+        return ""
+
+    def enroll_model(self) -> None:
+        """`nerfed enroll <model>`: fingerprint a model the bundled bank lacks with this machine's Codex."""
+        from PySide6.QtWidgets import QInputDialog
+        dialog = QInputDialog(self if self.isVisible() else None)
+        dialog.setWindowTitle(tr("Enroll a new model", "录入新模型指纹"))
+        dialog.setLabelText(tr(
+            "Model slug as Codex names it (e.g. gpt-6.1-sol). This sends 36 short low-effort requests to that model "
+            "through your Codex account, then rebuilds the fingerprint bank on this machine (a few minutes).",
+            "按 Codex 中的名称填写模型（如 gpt-6.1-sol）。将通过你的 Codex 账号向该模型发送 36 个低推理强度的短请求，"
+            "随后在本机重建指纹库（约几分钟）。"))
+        dialog.setTextValue(self._unlisted_model())
+        if not self.isVisible():
+            dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        dialog.raise_()
+        dialog.activateWindow()
+        ok = dialog.exec() == QDialog.DialogCode.Accepted
+        model = dialog.textValue().strip()
+        if ok and model:
+            self.backend.run(["enroll", model], key=f"enroll:{model}", timeout_ms=45 * 60 * 1000)
 
     def _show_error(self, message: str) -> None:
         self.last_snapshot_error = message
         self.substatus.setText(tr("Operation error: ", "操作错误：") + message)
+        if self.winui:
+            self.winui.error(message)
         if self.tray:
             self.tray.showMessage("is-gpt-nerfed", message[:800], QSystemTrayIcon.MessageIcon.Warning, 8000)
 
@@ -648,6 +688,14 @@ class MainWindow(QMainWindow):
             self._show_error(tr("Could not update user startup setting: ", "无法更新用户级自启动：") + str(exc))
 
     def open_inspector(self, thread_id: str | None = None) -> None:
+        if self.winui and self.winui.show(thread_id):
+            if self.panel and self.panel.floating:
+                self.panel.hide()
+            return
+        self._open_qt_inspector(thread_id)
+
+    def _open_qt_inspector(self, thread_id: str | None = None) -> None:
+        """显示内建 Qt 详细窗口（用于 Linux 或 WinUI 3 启动失败回退）。"""
         if thread_id:
             for row in range(self.thread_table.rowCount()):
                 item = self.thread_table.item(row, 0)
@@ -670,13 +718,16 @@ class MainWindow(QMainWindow):
             self.backend.run(["resume", "--thread", thread["id"]], key="resume:" + thread["id"], timeout_ms=30000)
 
     def probe_fresh(self) -> None:
-        if self.pending_fresh_at or "fresh" in self.backend.busy:
+        self.probe_fresh_with(self.model_input.text(), self.effort_input.currentText())
+
+    def probe_fresh_with(self, model: str, effort: str) -> None:
+        if self.demo or self.pending_fresh_at or "fresh" in self.backend.busy:
             return
         args = ["worker", "--fresh", "--detach"]
-        if self.model_input.text().strip():
-            args += ["--model", self.model_input.text().strip()]
-        if self.effort_input.currentText().strip():
-            args += ["--effort", self.effort_input.currentText().strip()]
+        if model.strip():
+            args += ["--model", model.strip()]
+        if effort.strip():
+            args += ["--effort", effort.strip()]
         if self.backend.run(args, key="fresh", timeout_ms=30000):
             import time
             self.pending_fresh_at = time.time()
@@ -696,23 +747,47 @@ class MainWindow(QMainWindow):
             self.backend.run(["hooks", "trust"], key="trust", timeout_ms=90000)
 
     def settings(self) -> None:
+        if self._settings_dialog is not None:
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+            return
         busy = self.backend.busy - {"snapshot"}
         live = self.snapshot_data or {}
         if busy or self.pending_probes or self.pending_fresh_at or live.get("global_running") or any(t.get("probe_running") for t in live.get("threads", [])):
-            QMessageBox.information(self, tr("Backend is busy", "核心仍在运行"),
-                                    tr("Wait for the active probe/setup operation to finish before changing profiles.",
-                                       "请等当前探测或安装操作完成后再切换后端。"))
+            box = QMessageBox(QMessageBox.Icon.Information, tr("Backend is busy", "核心仍在运行"),
+                              tr("Wait for the active probe/setup operation to finish before changing profiles.",
+                                 "请等当前探测或安装操作完成后再切换后端。"),
+                              QMessageBox.StandardButton.Ok, self if self.isVisible() else None)
+            if not self.isVisible():
+                box.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+            box.raise_()
+            box.activateWindow()
+            box.exec()
             return
         if self.demo:
             return
-        dialog = SettingsDialog(self.backend, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        dialog = SettingsDialog(self.backend, self if self.isVisible() else None)
+        if not self.isVisible():
+            # 从 WinUI 3 或托盘面板打开时保持置顶，避免被独立进程窗口遮挡。
+            dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self._settings_dialog = dialog
+        dialog.raise_()
+        dialog.activateWindow()
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            profile_value = dialog.profile()
+            autostart_changed = dialog.autostart_changed()
+            autostart_on = dialog.autostart_enabled()
+            config_updates = dialog.config_updates()
+        finally:
+            self._settings_dialog = None
+        if accepted:
             old_profile = dict(self.backend.profile)
-            if not self.backend.save_profile(dialog.profile()):
+            if not self.backend.save_profile(profile_value):
                 return
-            if dialog.autostart_changed():
+            if autostart_changed:
                 try:
-                    _set_autostart(dialog.autostart_enabled())
+                    _set_autostart(autostart_on)
                 except Exception as exc:
                     self._show_error(tr("Could not update user startup setting: ", "无法更新用户级自启动：") + str(exc))
             profile_changed = self.backend.profile != old_profile
@@ -726,7 +801,7 @@ class MainWindow(QMainWindow):
                 self._config_queue.clear()
                 self.refresh()
                 return
-            self._config_queue = dialog.config_updates()
+            self._config_queue = config_updates
             self._start_next_config()
 
     def _start_next_config(self) -> None:
@@ -809,6 +884,8 @@ class MainWindow(QMainWindow):
 
     def explicit_exit(self) -> None:
         self._closing = True
+        if self.winui:
+            self.winui.close()
         if self.tray:
             self.tray.hide()
         self.app.quit()
@@ -820,6 +897,7 @@ def run(demo: bool = False, screenshot: str | None = None, classic: bool = False
     app.setOrganizationName("is-gpt-nerfed")
     app.setQuitOnLastWindowClosed(False)
     app.setStyle("Fusion")
+    app.setWindowIcon(QIcon(str(ASSETS / "app-icon.png")))
     backend = Backend(demo=demo)
     win = MainWindow(backend, app)
     # The macOS-style tray panel is the primary surface; with no tray it is an ordinary
@@ -843,7 +921,7 @@ def run(demo: bool = False, screenshot: str | None = None, classic: bool = False
         backend.snapshotReady.connect(save_demo_shot)
         QTimer.singleShot(30000, lambda: app.exit(0))
     if classic:
-        win.show()
+        win.open_inspector(None)
     elif screenshot or not panel.floating:
         panel.show()
     else:

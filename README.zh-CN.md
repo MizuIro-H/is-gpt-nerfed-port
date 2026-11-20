@@ -32,6 +32,8 @@ Windows 包带有 WSL 核心，选择发行版后自动部署。界面支持英�
 
 ModelTrace 将回答与已校准模型库比较，给出匹配、可疑、降级、升级、重路由、未收录或无效等结果。它提供统计证据，不能直接证明服务端实际使用的权重；库外模型也可能被映射到相近模型。阈值、调度和方法说明见 [上游原版中文指南](docs/README-upstream.zh-CN.md)。
 
+**录入新模型**：内置库只含 ModelTrace 已收录的模型。遇到库里没有的新模型（如 `gpt-6.1-sol`），可在托盘菜单选“录入新模型指纹…”，或运行 `nerfed enroll gpt-6.1-sol`。程序会按 ModelTrace 的采集方式，通过你的 Codex 以低推理强度向该模型发送 36 个短请求（消耗额度；中断后再次运行只补缺失部分），然后结合 ModelTrace 公开的参考回答在本机重建指纹库（约 1 分钟）。重建后的库保存在 `NERFED_HOME`，内置库不变；`nerfed bank` 查看状态，`nerfed bank forget <模型>` 撤销录入。如果新模型与某个已知模型难以区分，程序会给出提示，此时两者之间的判定不可靠。
+
 点击托盘图标会打开仿照上游 macOS 菜单栏弹窗的面板（表情、判定标题、可原地展开报告的会话行、新会话探测和面板内设置）；“详细窗口”打开表格窗口，`--classic` 启动时直接显示它。桌面版包含会话列表、报告、通知、手动/重试/新会话探测、插件安装、hooks 信任和设置。Windows/Linux 通过手动替换便携包更新，上游 macOS 自动更新器不适用于本移植。
 
 ## 从源码编译
@@ -51,21 +53,23 @@ cd is-gpt-nerfed-port
 bash packaging/build_linux_docker.sh
 ```
 
-脚本在 Ubuntu 22.04 容器中构建，运行源码测试与离线界面/核心验收，输出桌面 TAR.GZ、独立 WSL 核心 TAR.GZ 及校验文件到 `Linux/dist/`。Docker 需能写入挂载的项目目录。Ubuntu 22.04 原生构建及开发调试命令见 [平台指南](README-CROSSPLATFORM.md#building-from-source)。
+脚本在 Ubuntu 22.04 容器中构建，运行源码测试与离线界面/核心验收，输出桌面 TAR.GZ、独立 WSL 核心 TAR.GZ 及校验文件到 `dist/`，并刷新可直接运行的 `dist/linux/`。Docker 需能写入挂载的项目目录。Ubuntu 22.04 原生构建及开发调试命令见 [平台指南](README-CROSSPLATFORM.md#building-from-source)。
 
-**Windows：**在 Windows PowerShell 5.1 或 PowerShell 7 中执行。先通过上面的 Linux 构建生成 `Linux/dist/nerfed-core-linux-x86_64.tar.gz`，也可从本仓库 Release 下载匹配版本的该附件并放入这个路径。然后在项目根目录执行：
+**Windows：**在 Windows PowerShell 5.1 或 PowerShell 7 中执行。先通过上面的 Linux 构建生成 `dist/nerfed-core-linux-x86_64.tar.gz`，也可从本仓库 Release 下载匹配版本的该附件并放入这个路径。然后在项目根目录执行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1
 ```
 
-脚本将 uv、Python、虚拟环境和缓存放在项目 `.build/` 内，安装固定版本依赖、编译、验收，再输出 `Windows/dist/IsGPTNerfed-0.5.3-windows-x64.zip` 及校验文件。如核心包位于其他目录，追加 `-LinuxCoreArchive "C:\path\nerfed-core-linux-x86_64.tar.gz"`。构建文件名使用核心版本号，Release 附件名另包含移植版本号。
+脚本将 uv、Python、虚拟环境和缓存放在项目 `.build/` 内，安装固定版本依赖、编译、验收，再输出 `dist/IsGPTNerfed-0.5.3-windows-x64.zip` 及校验文件，并刷新可直接运行的 `dist/windows/`。如核心包位于其他目录，追加 `-LinuxCoreArchive "C:\path\nerfed-core-linux-x86_64.tar.gz"`。构建文件名使用核心版本号，Release 附件名另包含移植版本号。
+
+安装包：完成上一步后执行 `.\packaging\build_installer.ps1`，输出 `dist/IsGPTNerfed-0.5.3-windows-x64-setup.exe`。安装包按用户安装到 `%LOCALAPPDATA%\Programs\is-gpt-nerfed`，不需要管理员权限。卸载时会注销 Codex 插件，但保留记录和设置。脚本首次运行会把固定版本的 Inno Setup 6.7.4 下载到 `.build/`，并校验其哈希。
 
 也可打开本 Fork 的 **Actions → Build cross-platform desktop packages → Run workflow**。工作流先构建 Linux，再把 WSL 核心交给 Windows 构建；完成后下载两个 Actions 产物即可。工作流不自动创建 Release。
 
 ## 源码结构与限制
 
-两平台共用 `desktop/`、`plugin/`、`packaging/` 和 `tests/`。本地 `Windows/`、`Linux/` 是已解压程序快照及构建产物，通过 `.gitignore` 排除，不上传到 Git 源码历史；编译成品通过 Release 附件分发。原始 `macos/` 源码和 [macOS 指南](docs/README-upstream.zh-CN.md) 仍保留，macOS 成品请到 [上游 Releases](https://github.com/kiyoakii/is-gpt-nerfed/releases) 获取。
+两平台共用 `desktop/`、`plugin/`、`packaging/` 和 `tests/`。所有编译产物统一放在 `dist/`（可运行的 `dist/windows/`、`dist/linux/` 与发布包并列），通过 `.gitignore` 排除，不上传到 Git 源码历史；编译成品通过 Release 附件分发。原始 `macos/` 源码和 [macOS 指南](docs/README-upstream.zh-CN.md) 仍保留，macOS 成品请到 [上游 Releases](https://github.com/kiyoakii/is-gpt-nerfed/releases) 获取。
 
 验收使用隔离的演示数据和模拟 Codex app-server，覆盖界面渲染、冻结核心、插件注册、UTF-8 hooks 与后台工作进程；尚未覆盖所有 Linux 桌面、Windows 环境及真实 Codex 服务端。当前发行版未签名，无自动更新器。0.5.3 核心会在检测到的 Codex 可执行文件中选择最新版本，同时仍优先采用用户显式配置的可执行文件。
 

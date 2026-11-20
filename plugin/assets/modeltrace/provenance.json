@@ -24,5 +24,14 @@
     "claude-opus-5-5"
   ],
   "scorer": "pure-Python port of codex-plugin/modeltrace-guard/scripts/fingerprint-core.mjs (tests/fixtures keeps the original for parity checks)",
-  "prompts": "zh/en probe prompts adapted from codex-plugin/modeltrace-guard/scripts/prompts.mjs"
+  "prompts": "zh/en probe prompts adapted from codex-plugin/modeltrace-guard/scripts/prompts.mjs",
+  "enrollment": {
+    "commit": "6cd4a8ff0f3f4e49d6d6969dd2fbadfa1569fde2",
+    "reference": {
+      "reference/gpt_reference.jsonl.gz": "gzip of data/gpt_reference.jsonl (sha256 b87e5630286308fdcec0893b89873635bf274b64a5269f41039eb46e66d3793f)",
+      "reference/claude_reference.jsonl.gz": "gzip of data/claude_reference.jsonl (sha256 13e5a9b266fefb96282e9857a53e3b408146dade66ca6220fa593fdff270d8a8)"
+    },
+    "code": "scripts/modeltrace_build: challenge_suite.py unchanged; builder.py is a pure-Python port of bank_builder.py (tests/modeltrace_numpy keeps the originals for parity checks)",
+    "use": "`nerfed enroll <model>` collects the 36-answer reference set for a model this bank lacks and rebuilds the bank in NERFED_HOME"
+  }
 }

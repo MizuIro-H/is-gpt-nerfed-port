@@ -603,8 +603,13 @@ class Panel(QWidget):
         super().keyPressEvent(e)
 
     def mousePressEvent(self, e) -> None:  # noqa: N802
-        if not self.floating and e.button() == Qt.MouseButton.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        # Presses that no button/row consumed land here: drag the frameless panel by its background.
+        if e.button() != Qt.MouseButton.LeftButton:
+            return super().mousePressEvent(e)
+        handle = self.windowHandle()
+        if handle is not None and handle.startSystemMove():
+            return  # the OS runs the move loop (also works on Wayland, where move() is ignored)
+        self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, e) -> None:  # noqa: N802
         if self._drag is not None:

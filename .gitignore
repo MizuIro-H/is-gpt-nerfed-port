@@ -1,6 +1,4 @@
-# Local runnable packages; distribute these as Release assets, not source.
-/Windows/
-/Linux/
+# All build outputs (runnable dist/windows, dist/linux and release archives); ship them as Release assets.
 /dist/
 
 # Build environments, caches and temporary output.
@@ -14,5 +12,7 @@ __pycache__/
 /fake_codex.spec
 /macos/build/
 /macos/.build/
+/windows-ui/**/bin/
+/windows-ui/**/obj/
 .DS_Store
 *.tmp

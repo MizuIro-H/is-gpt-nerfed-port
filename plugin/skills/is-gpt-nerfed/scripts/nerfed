@@ -28,6 +28,7 @@ except ImportError:  # Windows uses the CRT byte-range lock below.
     fcntl = None
 import glob
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -69,6 +70,9 @@ UPDATE_INTERVAL_S = 600  # every 10 minutes while the app is open; well inside G
 STATE_PATH = os.path.join(NERFED_HOME, "state.json")
 UNKNOWN_ACCOUNT = "unknown"
 BANK_PATH = os.path.join(PLUGIN_ROOT, "assets", "modeltrace", "unified_bank.json")
+REFERENCE_DIR = os.path.join(PLUGIN_ROOT, "assets", "modeltrace", "reference")   # ModelTrace's reference answers (gz)
+USER_BANK_PATH = os.path.join(NERFED_HOME, "unified_bank.json")   # rebuilt locally once models are enrolled
+ENROLLED_DIR = os.path.join(NERFED_HOME, "enrolled")               # <model>.jsonl: this machine's reference answers
 
 PLUGIN_NAME = "is-gpt-nerfed"
 MARKETPLACE_NAME = "is-gpt-nerfed"
@@ -109,10 +113,22 @@ def write_hook_runtime(command: list[str], plugin_root: str) -> None:
         pass
 
 
+def _hidden_startupinfo():
+    """Windows 下构造隐藏控制台窗口的 STARTUPINFO。"""
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = subprocess.SW_HIDE
+    return si
+
+
 def popen_detached_options() -> dict:
-    """Use the platform's detached-process flag while keeping stdin/stdout handling explicit."""
+    """Windows 下以无窗口独立进程组启动后台子进程，避免 DETACHED_PROCESS 导致 PyInstaller onefile 与子进程弹出空白终端。"""
     if os.name == "nt":
-        return {"creationflags": getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        return {
+            "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            "startupinfo": _hidden_startupinfo(),
+            "close_fds": True,
+        }
     return {"start_new_session": True}
 
 
@@ -177,23 +193,61 @@ def read_json(path: str, default=None):
         return default
 
 
+def subprocess_window_kwargs() -> dict:
+    """Windows 下隐藏控制台子进程窗口的启动参数。"""
+    if os.name == "nt":
+        return {
+            "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            "startupinfo": _hidden_startupinfo(),
+        }
+    return {}
+
+
+def atomic_replace(tmp: str, path: str, retries: int = 8) -> None:
+    """原子替换目标文件；在 Windows 并发占用时短退避重试，并在失败时清理临时文件。"""
+    replaced = False
+    try:
+        for attempt in range(max(1, retries)):
+            try:
+                os.replace(tmp, path)
+                replaced = True
+                return
+            except OSError as e:
+                winerr = getattr(e, "winerror", None)
+                is_transient = os.name == "nt" and (isinstance(e, PermissionError) or winerr in (5, 32))
+                if not is_transient or attempt + 1 >= max(1, retries):
+                    raise
+                time.sleep(0.015 * (attempt + 1))
+    finally:
+        if not replaced:
+            with contextlib.suppress(OSError):
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+
+
 def write_json(path: str, obj) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(obj, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
+    atomic_replace(tmp, path)
 
 
 def append_jsonl(path: str, obj) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    # One unbuffered write per record: concurrent hooks appending through a buffered text
+    # stream could interleave chunks and leave a line cut mid-character.
+    data = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
+    with open(path, "ab", buffering=0) as f:
+        f.write(data)
 
 
 def iter_jsonl(path: str):
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        # A damaged line must not take the whole history down; it simply fails to parse.
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -217,8 +271,10 @@ def log_event(kind: str, level: str = "info", **fields) -> None:
         os.makedirs(NERFED_HOME, exist_ok=True)
         entry = {"ts": iso(), "kind": kind, "level": level, "pid": os.getpid()}
         entry.update({k: v for k, v in fields.items() if v is not None})
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+        # 单次无缓冲字节写入，避免并发进程追加时分片交错破坏 JSONL。
+        data = (json.dumps(entry, ensure_ascii=False, default=str) + "\n").encode("utf-8")
+        with open(LOG_PATH, "ab", buffering=0) as f:
+            f.write(data)
     except Exception:
         pass
 
@@ -226,8 +282,9 @@ def log_event(kind: str, level: str = "info", **fields) -> None:
 def log_error(msg: str) -> None:
     try:
         os.makedirs(NERFED_HOME, exist_ok=True)
-        with open(ERRORS_PATH, "a", encoding="utf-8") as f:
-            f.write(f"{iso()} {msg}\n")
+        data = f"{iso()} {msg}\n".encode("utf-8", errors="replace")
+        with open(ERRORS_PATH, "ab", buffering=0) as f:
+            f.write(data)
     except Exception:
         pass
     log_event("error", level="error", message=str(msg)[:2000])
@@ -549,28 +606,264 @@ def note_account(source: str) -> dict:
             log_event("account_seen", source=source, id=acct["id"], label=acct["label"], plan=acct.get("plan"))
             rec = {**acct, "first_seen": iso(t), "switched_at": None, "switched_ts": None, "source": source, "previous": None}
     else:
+        if prev.get("label") == acct.get("label") and prev.get("plan") == acct.get("plan"):
+            last_ts = parse_iso(prev.get("last_seen"))
+            if last_ts is not None and 0 <= t - last_ts < 60:
+                return prev
         rec = {**prev, **acct}
     rec["last_seen"] = iso(t)
-    write_json(ACCOUNT_PATH, rec)
+    try:
+        write_json(ACCOUNT_PATH, rec)
+    except OSError as e:
+        log_error(f"account write skipped: {e!r}")
     return rec
 
 
 def load_bank() -> dict:
     global _BANK
     if _BANK is None:
-        if not os.path.exists(BANK_PATH):
-            raise SystemExit(f"fingerprint bank missing: {BANK_PATH}")
-        _BANK = core.load_bank(BANK_PATH)
+        user = read_json(USER_BANK_PATH, None) if os.path.exists(USER_BANK_PATH) else None
+        if isinstance(user, dict) and user.get("schema") == "robust-number-fingerprint-bank" and user.get("robust"):
+            _BANK = user  # bundled bank + locally enrolled models (`nerfed enroll`)
+        else:
+            if not os.path.exists(BANK_PATH):
+                raise SystemExit(f"fingerprint bank missing: {BANK_PATH}")
+            _BANK = core.load_bank(BANK_PATH)
     return _BANK
+
+
+# ------------------------------------------------------------------------------ local enrollment
+# The bundled bank only knows the models ModelTrace enrolled. `nerfed enroll <model>` collects the same 36-answer
+# reference set ModelTrace uses (12 prompt environments x 3, through Codex at low effort, exactly how its GPT
+# references were taken) for a model it lacks, and rebuilds the bank on this machine from ModelTrace's published
+# reference answers plus every locally enrolled model (modeltrace_build.builder: a pure-Python port of its builder).
+
+
+def enrolled_rows(model: str | None = None) -> list[dict]:
+    rows = []
+    if not os.path.isdir(ENROLLED_DIR):
+        return rows
+    for name in sorted(os.listdir(ENROLLED_DIR)):
+        if name.endswith(".jsonl") and (model is None or name == f"{model}.jsonl"):
+            with open(os.path.join(ENROLLED_DIR, name), "r", encoding="utf-8", errors="replace") as f:
+                rows.extend(json.loads(line) for line in f if line.strip())
+    return rows
+
+
+def reference_rows() -> list[dict]:
+    import gzip
+    rows = []
+    for family, display in (("gpt", "GPT"), ("claude", "Claude")):
+        path = os.path.join(REFERENCE_DIR, f"{family}_reference.jsonl.gz")
+        if not os.path.exists(path):
+            raise SystemExit(f"ModelTrace reference answers missing: {path}")
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            rows.extend({**json.loads(line), "family_id": family, "family_name": display} for line in f if line.strip())
+    return rows
+
+
+def rebuild_user_bank(quiet: bool = False) -> dict | None:
+    """Bundled reference answers + local enrollments → USER_BANK_PATH. Without enrollments the user bank is removed
+    so the bundled (provenance-checked) bank is used again."""
+    global _BANK
+    local = enrolled_rows()
+    if not local:
+        if os.path.exists(USER_BANK_PATH):
+            os.remove(USER_BANK_PATH)
+        _BANK = None
+        return None
+    from modeltrace_build import builder
+    local_ids = {r["model_id"] for r in local}
+    rows = [r for r in reference_rows() if r.get("model_id") not in local_ids] + local
+    if not quiet:
+        print(f"rebuilding the fingerprint bank: {len({r['model_id'] for r in rows})} models, {len(rows)} reference answers "
+              f"({len(local_ids)} enrolled here) — this takes a few minutes…", flush=True)
+    progress = None if quiet else (lambda q: print(f"  cross-validating {q}-answer verdicts…", flush=True))
+    bank = builder.build_bank(builder.prepare_rows(rows), progress=progress)
+    bank["source_scope"] = "ModelTrace reference outputs plus models enrolled on this machine (nerfed enroll)."
+    bank["local_enrollments"] = sorted(local_ids)
+    write_json(USER_BANK_PATH, bank)
+    _BANK = None
+    return bank
+
+
+def _enroll_family(model: str) -> tuple[str, str]:
+    m = model.lower()
+    return ("claude", "Claude") if m.startswith("claude") else ("gpt", "GPT")
+
+
+def cmd_enroll(args) -> int:
+    from modeltrace_build import challenge_suite
+    cfg = load_config()
+    model = normalize_model(args.model)
+    if not model:
+        raise SystemExit("usage: nerfed enroll <model>")
+    cb = codex_bin(cfg)
+    if not cb:
+        raise SystemExit("codex binary not found; set `nerfed config set codex_bin /path/to/codex`")
+    suite = challenge_suite.fingerprint_suite()
+    path = os.path.join(ENROLLED_DIR, f"{model}.jsonl")
+    kept = [] if args.restart else [r for r in enrolled_rows(model) if r.get("strict_valid")]
+    done = {r["challenge_id"] for r in kept}
+    todo = [q for q in suite if q["challenge_id"] not in done]
+    family, display = _enroll_family(model)
+    effort = args.effort
+    print(f"enrolling {model} (effort {effort}): {len(todo)} of {len(suite)} reference answers to collect"
+          + (f", {len(done)} kept from an earlier run" if done else ""), flush=True)
+    os.makedirs(ENROLLED_DIR, exist_ok=True)
+    orig = resolve_originator(cfg, cb, None, None)
+    version = codex_version(cb)
+    for attempt in range(1 + max(0, args.retries)):
+        if not todo:
+            break
+        failed = []
+        for i in range(0, len(todo), max(1, args.parallel)):
+            batch = todo[i:i + max(1, args.parallel)]
+            app = cas.AppServer(codex_command(cb), originator=orig)
+            forks = []
+            try:
+                app.initialize()
+                for q in batch:
+                    fork = cas.start_ephemeral(app, model, effort, None, os.path.expanduser("~"),
+                                               developer_instructions=q["system"] or None)
+                    fork["prompt"] = (q["user_prefix"] + "\n\n" + q["prompt"]) if q["user_prefix"] else q["prompt"]
+                    fork["q"] = q
+                    forks.append(fork)
+                cas.run_turns(app, forks, time.time() + args.timeout, parallel=True)
+            except cas.AppServerError as e:
+                print(f"  codex app-server: {e}", flush=True)
+            finally:
+                app.close()
+            for q in batch:
+                fork = next((f for f in forks if f.get("q") is q), None)
+                text = (fork or {}).get("text")
+                numbers = core.parse_numbers(text or "")
+                threshold = max(80, math.ceil(q["expected_count"] * 0.55))
+                if fork and fork.get("model") and normalize_model(fork["model"]) != model:
+                    print(f"  {q['challenge_id']}: Codex answered with {fork['model']}, not {model}; discarded", flush=True)
+                    failed.append(q)
+                    continue
+                if not fork or fork.get("error") or not text or len(numbers) < threshold:
+                    # A failed / tool-using / interrupted turn can still carry partial text; never enroll it.
+                    why = (fork or {}).get("error") or f"only {len(numbers)} of {q['expected_count']} numbers"
+                    print(f"  {q['challenge_id']} ({q['condition']}): {why}", flush=True)
+                    failed.append(q)
+                    continue
+                kept.append({
+                    "row_id": f"{model}__{q['challenge_id']}", "parent_row_id": f"{model}__{q['challenge_id']}",
+                    "bank_id": family, "source": model, "model_id": model, "response_model": fork.get("model"),
+                    "exact_version": model, "condition_id": q["condition"], "nuisance_condition_id": q["condition"],
+                    "wrapper_id": q["condition"], "wrapper_transport": q["transport"], "challenge_id": q["challenge_id"],
+                    "task_index": 0, "requested_count": q["expected_count"], "parsed_count": len(numbers),
+                    "strict_threshold": threshold, "strict_valid": True, "temperature": "provider_default",
+                    "config_id": "local-enrollment", "provider": "codex", "prompt": fork["prompt"], "base_prompt": q["prompt"],
+                    "system_prompt": q["system"], "user_prefix": q["user_prefix"], "text": text, "error": None,
+                    "request_seconds": fork.get("elapsed_s"), "collected_at": iso(), "reasoning_effort": effort,
+                    "cli_version": version, "family_id": family, "family_name": display,
+                })
+            # Persist after every batch so an interrupted run resumes where it stopped.
+            tmp = f"{path}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp"
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                for row in sorted(kept, key=lambda r: r["challenge_id"]):
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            atomic_replace(tmp, path)
+            print(f"  {len(kept)}/{len(suite)} collected", flush=True)
+        todo = failed
+    log_event("enroll", model=model, collected=len(kept), missing=len(todo))
+    if todo:
+        print(f"{len(todo)} answers are still missing; run `nerfed enroll {model}` again to collect only those. "
+              "The bank is not rebuilt until the set is complete (calibration needs every prompt).")
+        return 1
+    bank = rebuild_user_bank()
+    cal = (bank or {}).get("calibration", {}).get("3") or {}
+    print(f"done: {model} is in the fingerprint bank ({USER_BANK_PATH}); "
+          f"cross-validated 3-answer accuracy {cal.get('cv_accuracy', 0):.1%} over {len((bank or {}).get('models') or [])} models")
+    for other, share in enrollment_twins(bank, model):
+        print(f"warning: {model} and {other} are hard to tell apart ({share:.0%} of 3-answer checks swapped them). "
+              f"Either they share a base model, or Codex answered these requests with {other}; verdicts between "
+              "the two are unreliable, and a MISMATCH naming one for the other is not evidence on its own.")
+    return 0
+
+
+def enrollment_twins(bank: dict | None, model: str, threshold: float = 0.2) -> list[tuple[str, float]]:
+    """Known models the enrolled one is confused with (either way) in at least `threshold` of 3-answer checks."""
+    cal = (bank or {}).get("calibration", {}).get("3") or {}
+    confusions, samples = cal.get("confusions") or {}, cal.get("samples_per_model") or {}
+    twins = {}
+    for pair, count in confusions.items():
+        truth, _, picked = pair.partition("->")
+        if model in (truth, picked):
+            other = picked if truth == model else truth
+            twins[other] = max(twins.get(other, 0.0), count / max(1, samples.get(truth, 0)))
+    return sorted(((m, s) for m, s in twins.items() if s >= threshold), key=lambda x: -x[1])
+
+
+def cmd_bank(args) -> int:
+    action = args.action
+    if action == "rebuild":
+        bank = rebuild_user_bank()
+        print("no enrolled models; using the bundled bank" if bank is None else f"rebuilt {USER_BANK_PATH}")
+        return 0
+    if action == "forget":
+        if not args.model:
+            raise SystemExit("usage: nerfed bank forget <model>")
+        path = os.path.join(ENROLLED_DIR, f"{normalize_model(args.model)}.jsonl")
+        if os.path.exists(path):
+            os.remove(path)
+        rebuild_user_bank()
+        print(f"forgot {args.model}")
+        return 0
+    bank = load_bank()
+    local = sorted({r["model_id"] for r in enrolled_rows()})
+    cal = bank.get("calibration", {}).get("3") or {}
+    info = {"bank": USER_BANK_PATH if bank.get("local_enrollments") is not None else BANK_PATH,
+            "built_at": bank.get("built_at"), "models": core.bank_model_ids(bank), "enrolled_here": local,
+            "cv_accuracy_3": cal.get("cv_accuracy"),
+            "twins": {m: dict(enrollment_twins(bank, m)) for m in local if enrollment_twins(bank, m)}}
+    if getattr(args, "json", False):
+        print(json.dumps(info, ensure_ascii=False))
+    else:
+        print(f"bank: {info['bank']} (built {info['built_at']})")
+        print("models: " + ", ".join(info["models"]))
+        print("enrolled here: " + (", ".join(local) or "none"))
+        if info["cv_accuracy_3"] is not None:
+            print(f"3-answer cross-validated accuracy: {info['cv_accuracy_3']:.1%}")
+        for m, twins in info["twins"].items():
+            print(f"hard to tell apart: {m} ~ " + ", ".join(f"{o} ({s:.0%})" for o, s in twins.items()))
+    return 0
 
 
 # ------------------------------------------------------------------------------- codex state DB
 
 
+def codex_sqlite_home() -> str:
+    """Where Codex keeps its SQLite state: config.toml's top-level `sqlite_home` (or CODEX_SQLITE_HOME) when set,
+    else CODEX_HOME. A stale state_*.sqlite left in CODEX_HOME from before the move must not shadow the live one."""
+    env = os.environ.get("CODEX_SQLITE_HOME")
+    if env:
+        return os.path.expanduser(env)
+    try:
+        with open(os.path.join(CODEX_HOME, "config.toml"), "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.lstrip().startswith("["):
+                    break  # only root keys apply
+                m = re.match(r"""\s*sqlite_home\s*=\s*(?:'([^']*)'|"((?:[^"\\]|\\.)*)")""", line)
+                if m:
+                    value = m.group(1) if m.group(1) is not None else m.group(2).encode().decode("unicode_escape")
+                    if value:
+                        return os.path.expanduser(value)
+    except OSError:
+        pass
+    return CODEX_HOME
+
+
 def state_db_path() -> str | None:
-    cands = sorted(glob.glob(os.path.join(CODEX_HOME, "state_*.sqlite")),
-                   key=lambda p: int(re.search(r"state_(\d+)", p).group(1)))
-    return cands[-1] if cands else None
+    for home in dict.fromkeys((codex_sqlite_home(), CODEX_HOME)):
+        cands = sorted(glob.glob(os.path.join(home, "state_*.sqlite")),
+                       key=lambda p: int(re.search(r"state_(\d+)", p).group(1)))
+        if cands:
+            return cands[-1]
+    return None
 
 
 def db_query(sql: str, params=()) -> list[dict]:
@@ -897,7 +1190,7 @@ def fresh_due(cfg: dict, account_id: str) -> bool:
 
 def spawn_fresh_worker() -> bool:
     try:
-        with open(WORKER_LOG, "a") as log:
+        with open(WORKER_LOG, "a", encoding="utf-8") as log:
             subprocess.Popen(cli_command("worker", "--fresh"), stdout=log, stderr=log, stdin=subprocess.DEVNULL,
                              env=child_process_env(strip_sandbox=True),
                              **popen_detached_options())
@@ -949,7 +1242,8 @@ def codex_version(path: str | None) -> str | None:
             _CODEX_VERSIONS[path] = hit.get("version")
         else:
             try:
-                out = subprocess.run(codex_command(path) + ["--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10).stdout
+                out = subprocess.run(codex_command(path) + ["--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10,
+                                     **subprocess_window_kwargs()).stdout
             except Exception:
                 out = ""
             m = re.search(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?", out)
@@ -979,23 +1273,30 @@ def codex_candidates() -> list[str]:
         local = os.environ.get("LOCALAPPDATA", "")
         program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
         paths.extend([
+            os.path.join(local, "Programs", "OpenAI", "Codex", "bin", "codex.exe"),
             os.path.join(local, "Programs", "Codex", "resources", "codex.exe"),
             os.path.join(local, "Programs", "ChatGPT", "resources", "codex.exe"),
             os.path.join(local, "Microsoft", "WindowsApps", "codex.exe"),
         ])
-        ps = shutil.which("powershell.exe") or shutil.which("powershell")
-        if ps:
-            try:
-                result = subprocess.run(
-                    [ps, "-NoProfile", "-NonInteractive", "-Command",
-                     "Get-AppxPackage -Name OpenAI.Codex | ForEach-Object { Join-Path $_.InstallLocation 'app\\resources\\codex.exe' }"],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8)
-                if result.returncode == 0:
-                    paths.extend(line.strip() for line in result.stdout.splitlines() if line.strip())
-            except Exception:
-                pass
-        paths.extend(glob.glob(os.path.join(program_files, "WindowsApps", "OpenAI.Codex_*", "app", "resources", "codex.exe")))
-        paths.extend(glob.glob(os.path.join(program_files, "WindowsApps", "OpenAI.ChatGPT_*", "app", "resources", "codex.exe")))
+        appx_globs = [
+            *glob.glob(os.path.join(program_files, "WindowsApps", "OpenAI.Codex_*", "app", "resources", "codex.exe")),
+            *glob.glob(os.path.join(program_files, "WindowsApps", "OpenAI.ChatGPT_*", "app", "resources", "codex.exe")),
+        ]
+        paths.extend(appx_globs)
+        # 仅当文件系统扫描未发现 WindowsApps 版 Codex 时，才回退调用 PowerShell Get-AppxPackage。
+        if not any(os.path.isfile(p) for p in appx_globs):
+            ps = shutil.which("powershell.exe") or shutil.which("powershell")
+            if ps:
+                try:
+                    result = subprocess.run(
+                        [ps, "-NoProfile", "-NonInteractive", "-Command",
+                         "Get-AppxPackage -Name OpenAI.Codex | ForEach-Object { Join-Path $_.InstallLocation 'app\\resources\\codex.exe' }"],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8,
+                        **subprocess_window_kwargs())
+                    if result.returncode == 0:
+                        paths.extend(line.strip() for line in result.stdout.splitlines() if line.strip())
+                except Exception:
+                    pass
     paths.extend(APP_CODEX_BINS)
     seen, out = set(), []
     for path in paths:
@@ -1357,9 +1658,25 @@ def finalize_probe(rec: dict, outputs: list[dict], expected: str | None, errors:
     return rec
 
 
+def is_desktop_originator(originator: str | None) -> bool:
+    """Threads the desktop app created: macOS reports "Codex Desktop", the Windows app (ChatGPT/Codex MSIX)
+    reports "codex_work_desktop"."""
+    o = (originator or "").strip().lower()
+    return o.startswith("codex desktop") or o.endswith("_desktop")
+
+
 def default_originator(codex_bin: str | None) -> str:
     """What the user's own client reports as its originator: the desktop app when its bundled binary is used."""
-    return "Codex Desktop" if codex_bin and ".app/Contents/" in codex_bin else "codex_cli_rs"
+    norm = (codex_bin or "").replace("\\", "/").lower()
+    desktop_markers = (
+        ".app/contents/",
+        "openai.codex_",
+        "openai.chatgpt_",
+        "/programs/openai/codex/",
+        "/programs/codex/",
+        "/programs/chatgpt/",
+    )
+    return "Codex Desktop" if any(marker in norm for marker in desktop_markers) else "codex_cli_rs"
 
 
 def resolve_originator(cfg: dict, codex_bin: str | None, thread_row: dict | None = None, override: str | None = None) -> str:
@@ -1579,7 +1896,7 @@ def transport_like(errors: list[str]) -> bool:
 
 def spawn_worker(thread_id: str, cfg: dict) -> bool:
     try:
-        with open(WORKER_LOG, "a") as log:
+        with open(WORKER_LOG, "a", encoding="utf-8") as log:
             subprocess.Popen(cli_command("worker", "--thread", thread_id), stdout=log, stderr=log,
                              stdin=subprocess.DEVNULL, **popen_detached_options(),
                              env=child_process_env(strip_sandbox=True))
@@ -2334,11 +2651,11 @@ def migrate_untagged_records(account_id: str) -> None:
                     rec["account"] = {"id": UNKNOWN_ACCOUNT, "label": "", "plan": None, "note": "recorded before accounts were tracked"}
                     write_json(probe_path(r["id"]), rec)
         if changed:
-            tmp = PROBES_INDEX + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
+            tmp = f"{PROBES_INDEX}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp"
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
                 for r in rows:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
-            os.replace(tmp, PROBES_INDEX)
+            atomic_replace(tmp, PROBES_INDEX)
     for st in all_sessions():
         if st.get("probes") and not st.get("last_probe_account"):
             st["last_probe_account"] = UNKNOWN_ACCOUNT
@@ -2767,7 +3084,7 @@ def hooks_status(cfg: dict, max_age_s: float = 900, force: bool = False) -> dict
     if sids:
         marks = ",".join("?" for _ in sids)
         rows = db_query(f"SELECT id, originator FROM threads WHERE id IN ({marks})", tuple(sids))
-        desk = [sids[r["id"]] for r in rows if (r.get("originator") or "").startswith("Codex Desktop") and sids.get(r["id"])]
+        desk = [sids[r["id"]] for r in rows if is_desktop_originator(r.get("originator")) and sids.get(r["id"])]
         last_desktop = max(desk) if desk else None
     out = {k: cached.get(k) for k in ("checked", "total", "trusted", "untrusted", "disabled", "state", "error")}
     out["notes"] = cached.get("notes") or []
@@ -3085,7 +3402,8 @@ def manifest_paths() -> list[str]:
 
 def run(cmd: list[str], timeout: int = 120) -> tuple[int, str]:
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                           **subprocess_window_kwargs())
         return r.returncode, (r.stdout + r.stderr).strip()
     except Exception as e:
         return 1, str(e)
@@ -3118,6 +3436,11 @@ def cmd_setup(args) -> int:
     if cb and not args.no_cli:
         print(f"codex: {cb}")
         rc, out = run(codex_command(cb) + ["plugin", "marketplace", "add", root])
+        if rc != 0 and "different source" in out:
+            # Codex refuses to repoint an existing marketplace; an older install (another folder or version)
+            # would otherwise keep serving its stale plugin copy to `plugin add`.
+            run(codex_command(cb) + ["plugin", "marketplace", "remove", MARKETPLACE_NAME])
+            rc, out = run(codex_command(cb) + ["plugin", "marketplace", "add", root])
         print(f"  marketplace add → rc={rc} {out[:300]}")
         cache_root = os.path.join(CODEX_HOME, "plugins", "cache", PLUGIN_NAME, PLUGIN_NAME)
         previous = [d for d in (os.listdir(cache_root) if os.path.isdir(cache_root) else []) if not d.startswith(".")]
@@ -3505,6 +3828,20 @@ def build_parser() -> argparse.ArgumentParser:
     a = ps.add_parser("list")
     a.add_argument("--last", type=int, default=20)
     a.set_defaults(fn=lambda args: cmd_report(argparse.Namespace(last=args.last)))
+
+    s = sub.add_parser("enroll", help="fingerprint a model the bank does not know yet (36 short low-effort requests), then rebuild the bank locally")
+    s.add_argument("model", help="model slug as Codex names it, e.g. gpt-6.1-sol")
+    s.add_argument("--effort", default="low", help="reasoning effort (ModelTrace's GPT references use low)")
+    s.add_argument("--parallel", type=int, default=6)
+    s.add_argument("--retries", type=int, default=1, help="extra rounds for answers that came back unusable")
+    s.add_argument("--timeout", type=float, default=240, help="seconds per batch")
+    s.add_argument("--restart", action="store_true", help="discard answers kept from an earlier run")
+    s.set_defaults(fn=cmd_enroll)
+    s = sub.add_parser("bank", help="status | rebuild | forget <model> — the fingerprint bank and local enrollments")
+    s.add_argument("action", nargs="?", default="status", choices=["status", "rebuild", "forget"])
+    s.add_argument("model", nargs="?")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_bank)
 
     s = sub.add_parser("worker", help="(background) run one fork probe for a session, or --fresh for a global probe")
     s.add_argument("--thread")

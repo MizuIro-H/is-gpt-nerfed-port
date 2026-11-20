@@ -32,6 +32,8 @@ Passive checks read Codex's recorded model, reasoning effort and context-window 
 
 ModelTrace scores those answers against a calibrated, closed-set bank. A match means the answers resemble the requested model; a confident mismatch can be marked downgrade, upgrade or rerouted. Suspicious, unlisted and invalid results need interpretation. The fingerprint is statistical evidence, not proof of the server's actual weights, and an unknown model can resemble a listed one. See the [original upstream guide](docs/README-upstream.md) for verdict definitions, thresholds, scheduling and methodology.
 
+**Enrolling new models:** the bundled bank knows only the models ModelTrace enrolled. For a newer one (e.g. `gpt-6.1-sol`), use **Enroll a new model…** in the tray menu or run `nerfed enroll gpt-6.1-sol`. It collects ModelTrace's 36-prompt reference set from that model through your Codex at low effort (this uses quota; an interrupted run resumes), then rebuilds the bank on this machine from ModelTrace's published reference answers plus your enrollments (about a minute). The rebuilt bank lives in `NERFED_HOME`, and the bundled one is left untouched. `nerfed bank` shows the current state, and `nerfed bank forget <model>` undoes an enrollment. If the new model cannot be told apart from a known one, enrollment says so; verdicts between those two models are then unreliable.
+
 Clicking the tray icon opens a panel modelled on the upstream macOS menu-bar popover (face, verdict headline, session rows that expand into their report, fresh-session probe and in-panel settings); **Inspector** opens the table window, and `--classic` starts with it. The desktop provides a session list, reports, notifications, manual/retry/fresh probes, plugin setup, hook trust and settings. Windows/Linux updates are **manual**; the original macOS automatic updater is not part of this port.
 
 ## Build from source
@@ -51,21 +53,23 @@ Build tools are pinned to Python 3.12, PySide6 6.11.2 and PyInstaller 6.22.3. Ne
 bash packaging/build_linux_docker.sh
 ```
 
-This builds in Ubuntu 22.04, runs source tests and offline GUI/core smoke checks, and produces the desktop TAR.GZ plus a standalone WSL core TAR.GZ and SHA-256 files in `Linux/dist/`. Docker must be able to write to the mounted checkout. For the native Ubuntu 22.04 build and development commands, see the [platform guide](README-CROSSPLATFORM.md#building-from-source).
+This builds in Ubuntu 22.04, runs source tests and offline GUI/core smoke checks, and produces the desktop TAR.GZ plus a standalone WSL core TAR.GZ and SHA-256 files in `dist/`, and refreshes the runnable `dist/linux/`. Docker must be able to write to the mounted checkout. For the native Ubuntu 22.04 build and development commands, see the [platform guide](README-CROSSPLATFORM.md#building-from-source).
 
-**Windows:** use Windows PowerShell 5.1 or PowerShell 7 with internet access. First create `Linux/dist/nerfed-core-linux-x86_64.tar.gz` with the Linux build above, or download the matching core asset from this fork's Release into that path. Then, from the checkout root:
+**Windows:** use Windows PowerShell 5.1 or PowerShell 7 with internet access. First create `dist/nerfed-core-linux-x86_64.tar.gz` with the Linux build above, or download the matching core asset from this fork's Release into that path. Then, from the checkout root:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1
 ```
 
-The script downloads project-local uv and Python, installs the pinned dependencies, builds and tests the Windows program, and produces `Windows/dist/IsGPTNerfed-0.5.3-windows-x64.zip` plus its checksum. To use another matching WSL archive, pass `-LinuxCoreArchive "C:\path\nerfed-core-linux-x86_64.tar.gz"`. Build filenames use the core version; Release filenames additionally identify the port revision.
+The script downloads project-local uv and Python, installs the pinned dependencies, builds and tests the Windows program, and produces `dist/IsGPTNerfed-0.5.3-windows-x64.zip` plus its checksum, and refreshes the runnable `dist/windows/`. To use another matching WSL archive, pass `-LinuxCoreArchive "C:\path\nerfed-core-linux-x86_64.tar.gz"`. Build filenames use the core version; Release filenames additionally identify the port revision.
+
+For an installer, run `.\packaging\build_installer.ps1` afterwards; it writes `dist/IsGPTNerfed-0.5.3-windows-x64-setup.exe`. The installer works per user, in `%LOCALAPPDATA%\Programs\is-gpt-nerfed`, and needs no admin rights. Uninstalling unregisters the Codex plugin but keeps the ledger and settings. On first use the script downloads the pinned Inno Setup 6.7.4 into `.build/` and verifies its hash.
 
 Alternatively run **Actions → Build cross-platform desktop packages → Run workflow** in this fork. It builds Linux first and passes the WSL runtime to Windows. A manual run produces two downloadable Actions artifacts. Pushing a `v*-port.*` tag also validates both platforms, creates consistently versioned archives and checksums, and publishes the GitHub Release automatically.
 
 ## Repository and limitations
 
-`desktop/`, `plugin/`, `packaging/` and `tests/` are shared source. `Windows/` and `Linux/` are local runnable snapshots and build outputs, ignored by Git. Release archives carry their compiled programs. The original `macos/` source and its [upstream guide](docs/README-upstream.md) are retained; macOS downloads remain in [upstream Releases](https://github.com/kiyoakii/is-gpt-nerfed/releases).
+`desktop/`, `plugin/`, `packaging/` and `tests/` are shared source. Every build output lands in `dist/` (ignored by Git): runnable `dist/windows/` and `dist/linux/` folders next to the release archives. Release archives carry their compiled programs. The original `macos/` source and its [upstream guide](docs/README-upstream.md) are retained; macOS downloads remain in [upstream Releases](https://github.com/kiyoakii/is-gpt-nerfed/releases).
 
 Validation uses isolated demo data and a fake Codex app-server: it checks GUI rendering, frozen-core startup, plugin registration, UTF-8 hooks and detached workers. It does not establish compatibility with every Linux desktop, Windows installation, or live Codex server. This release is unsigned and has no automatic updater. The 0.5.3 core selects the newest discovered Codex binary while continuing to honor an explicitly configured binary.
 

@@ -6,18 +6,20 @@
 
 ## 本地目录管理
 
-两套已构建版本分别放在仓库根目录的 `Windows/` 和 `Linux/`：
+所有编译产物统一放在仓库根目录的 `dist/`（已被 `.gitignore` 排除）：
 
-| 内容 | Windows 移植 | Linux 移植 |
-| --- | --- | --- |
-| 可运行程序 | `Windows/IsGPTNerfed.exe` | `Linux/IsGPTNerfed` |
-| 配套核心、插件与运行库 | `Windows/` 内 | `Linux/` 内 |
-| 发布包及 SHA-256 | `Windows/dist/` | `Linux/dist/` |
-| 构建入口 | `packaging/build_windows.ps1` | `packaging/build_linux_docker.sh` |
+```text
+dist/
+├── windows/                                  可运行的 Windows 版（IsGPTNerfed.exe、nerfed-core.exe、plugin/、wsl/ …）
+├── linux/                                    可运行的 Linux 版（IsGPTNerfed、nerfed-core、plugin/ …）
+├── IsGPTNerfed-0.5.3-windows-x64.zip(.sha256)
+├── IsGPTNerfed-0.5.3-linux-x86_64.tar.gz(.sha256)
+└── nerfed-core-linux-x86_64.tar.gz(.sha256)  Windows 版内置的 WSL 核心
+```
 
-`Windows/wsl/` 是 Windows 版支持 WSL 所必需的核心包，请随 Windows 版一起保留。`Linux/dist/IsGPTNerfed/` 和 `Linux/dist/nerfed-core` 是原构建中间产物；日常运行使用上表中的完整版本。
+构建入口分别是 `packaging/build_windows.ps1` 和 `packaging/build_linux_docker.sh`；每次构建都会重建对应的 `dist/windows/` 或 `dist/linux/`。`dist/windows/wsl/` 是 Windows 版支持 WSL 所必需的核心包，请随 Windows 版一起保留。PyInstaller 中间产物和构建缓存留在 `.build/windows/`、`.build/linux/`。
 
-`desktop/`、`plugin/`、`packaging/` 和测试继续由两平台共用，避免两套源码产生差异。构建缓存原本已分别位于 `.build/windows/` 与 `.build/linux/`，保持现有位置。以后构建生成的发布包会进入各平台的 `dist/`；根目录下的可运行版本是本次整理的快照，更新时需要从新发布包重新解压。
+`desktop/`、`plugin/`、`packaging/` 和测试继续由两平台共用，避免两套源码产生差异。
 
 ## 启动
 
@@ -47,7 +49,7 @@ Get-FileHash .\IsGPTNerfed-0.5.3-windows-x64.zip -Algorithm SHA256
 
 ### Docker 构建 Linux
 
-先克隆本 Fork：`git clone https://github.com/MizuIro-H/is-gpt-nerfed-port.git`，然后 `cd is-gpt-nerfed-port`。以下命令均在仓库根目录执行。Linux 需要能运行 `docker info` 的 Docker Engine；WSL 用户需要启用 Docker Desktop 对该发行版的集成。脚本在 Ubuntu 22.04 容器中建立独立 Python 环境，并写入 `Linux/dist/`：
+先克隆本 Fork：`git clone https://github.com/MizuIro-H/is-gpt-nerfed-port.git`，然后 `cd is-gpt-nerfed-port`。以下命令均在仓库根目录执行。Linux 需要能运行 `docker info` 的 Docker Engine；WSL 用户需要启用 Docker Desktop 对该发行版的集成。脚本在 Ubuntu 22.04 容器中建立独立 Python 环境，并写入 `dist/`：
 
 ```sh
 bash packaging/build_linux_docker.sh
@@ -55,11 +57,11 @@ bash packaging/build_linux_docker.sh
 
 ### 构建 Windows
 
-Windows 必须在原生 Windows PowerShell 或 PowerShell 7 中构建。脚本把 uv、Python 3.12、虚拟环境、PyInstaller 缓存限制在 `.build/`，不改系统 Python 或用户 PATH。先完成 Linux 构建（WSL 核心位于 `Linux/dist/nerfed-core-linux-x86_64.tar.gz`）。以下下载命令仅供重建旧版 0.5.2 使用：
+Windows 必须在原生 Windows PowerShell 或 PowerShell 7 中构建。脚本把 uv、Python 3.12、虚拟环境、PyInstaller 缓存限制在 `.build/`，不改系统 Python 或用户 PATH。先完成 Linux 构建（WSL 核心位于 `dist/nerfed-core-linux-x86_64.tar.gz`）。以下下载命令仅供重建旧版 0.5.2 使用：
 
 ```powershell
-New-Item -ItemType Directory -Force .\Linux\dist | Out-Null
-Invoke-WebRequest -Uri "https://github.com/MizuIro-H/is-gpt-nerfed-port/releases/download/v0.5.3-port.1/nerfed-core-linux-x86_64.tar.gz" -OutFile .\Linux\dist\nerfed-core-linux-x86_64.tar.gz
+New-Item -ItemType Directory -Force .\dist | Out-Null
+Invoke-WebRequest -Uri "https://github.com/MizuIro-H/is-gpt-nerfed-port/releases/download/v0.5.3-port.1/nerfed-core-linux-x86_64.tar.gz" -OutFile .\dist\nerfed-core-linux-x86_64.tar.gz
 ```
 
 核对 Release 的校验文件后构建：

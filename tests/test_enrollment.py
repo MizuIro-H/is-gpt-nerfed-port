@@ -145,6 +145,55 @@ class EnrollTests(unittest.TestCase):
         self.assertIn(f"{len(suite) - 1} of {len(suite)}", out, "an earlier answer is kept, not re-requested")
         self.assertFalse(os.path.exists(nerfed.USER_BANK_PATH), "an incomplete set never reaches the bank")
 
+    def test_rebuild_user_bank_preserves_and_deduplicates_aliases(self):
+        # Reference rows carrying display_name & aliases should survive user-bank rebuilds,
+        # while locally enrolling an aliased model strips the conflicting alias from its original carrier.
+        aliased_ref = [
+            ({**r, "display_name": "gpt-6-sol/alias", "aliases": ["gpt-6.9-alias", "gpt-6.9-keep"]}
+             if r["model_id"] == "gpt-6-sol" else r)
+            for r in reference_subset()
+        ]
+        os.makedirs(nerfed.ENROLLED_DIR)
+        with open(os.path.join(nerfed.ENROLLED_DIR, "gpt-6.9-alias.jsonl"), "w", encoding="utf-8") as f:
+            for r in reference_subset():
+                if r["model_id"] == "gpt-5.5":
+                    f.write(json.dumps({**r, "model_id": "gpt-6.9-alias", "source": "gpt-6.9-alias"}) + "\n")
+        with mock.patch.object(nerfed, "reference_rows", return_value=aliased_ref):
+            rc, _ = self.run_cli("bank", "rebuild")
+        self.assertEqual(rc, 0)
+        bank = nerfed.load_bank()
+        aliases = nerfed.core.bank_model_aliases(bank)
+        self.assertNotIn("gpt-6.9-alias", aliases)
+        self.assertEqual(aliases.get("gpt-6.9-keep"), "gpt-6-sol")
+        sol_entry = next(m for m in bank["models"] if m["id"] == "gpt-6-sol")
+        self.assertEqual(sol_entry["display_name"], "gpt-6-sol/alias")
+
+
+class BundledBankTests(unittest.TestCase):
+    def test_bundled_bank_matches_provenance_and_covers_post_56_gpt(self):
+        import hashlib
+        bank_path = os.path.join(ROOT, "plugin", "assets", "modeltrace", "unified_bank.json")
+        prov_path = os.path.join(ROOT, "plugin", "assets", "modeltrace", "provenance.json")
+        with open(bank_path, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        with open(prov_path, "r", encoding="utf-8") as f:
+            prov = json.load(f)
+        self.assertEqual(digest, prov["sha256"])
+        bank = nerfed.core.load_bank(bank_path)
+        ids = nerfed.core.bank_model_ids(bank)
+        self.assertEqual(ids, prov["models"])
+        for model_id in ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol", "gpt-6.2-astra"):
+            self.assertIn(model_id, ids)
+        aliases = nerfed.core.bank_model_aliases(bank)
+        self.assertEqual(aliases.get("gpt-6.1-sol"), "gpt-6-astra")
+        with open(FIXTURE, encoding="utf-8") as f:
+            astra = [json.loads(line) for line in f if json.loads(line)["model_id"] == "gpt-6-astra"]
+        analysis = nerfed.core.analyze_global_outputs(
+            [{"text": r["text"], "expected_count": r["requested_count"]} for r in astra], bank)
+        verdict = nerfed.assess("gpt-6.1-sol", analysis, [])
+        self.assertEqual(verdict["verdict"], "MATCH")
+        self.assertTrue(verdict["matched_via_alias"])
+
 
 if __name__ == "__main__":
     unittest.main()

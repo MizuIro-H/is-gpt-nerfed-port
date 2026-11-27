@@ -2,9 +2,9 @@
   "source": "https://github.com/xqy2006/ModelTrace",
   "commit": "55a2e4a55170423b484d701e9a82ab62b268c811",
   "file": "data/unified_bank.json",
-  "sha256": "1c2cb74d372f9f0f30d0dabbb7b7a838660d2f769a88d0c8489e4c662e088c21",
+  "sha256": "a1ca0ff4eddd52571b27c52985fc9cb049da0916c8ef573f5f12ff12ac453a7a",
   "license": "MIT (see LICENSE-ModelTrace.txt)",
-  "bank_built_at": "2026-09-23T06:17:08.081468+00:00",
+  "bank_built_at": "2026-11-27T02:18:51.301500+00:00",
   "models": [
     "gpt-5.4",
     "gpt-5.5",
@@ -14,6 +14,9 @@
     "gpt-6-astra",
     "gpt-6-sol",
     "gpt-6-luna",
+    "gpt-6.1-terra",
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
     "claude-haiku-4-5-20251001",
     "claude-sonnet-4-6",
     "claude-sonnet-5",
@@ -28,10 +31,32 @@
   "enrollment": {
     "commit": "6cd4a8ff0f3f4e49d6d6969dd2fbadfa1569fde2",
     "reference": {
-      "reference/gpt_reference.jsonl.gz": "gzip of data/gpt_reference.jsonl (sha256 b87e5630286308fdcec0893b89873635bf274b64a5269f41039eb46e66d3793f)",
+      "reference/gpt_reference.jsonl.gz": "gzip of combined GPT reference answers (ModelTrace <=gpt-5.6 + Ikaleio/lm-detector post-5.6 GPT; uncompressed sha256 6931eb4e62021b8779f6c58e2d34747792a57fafc2eb8be0f58ec975b060999e)",
       "reference/claude_reference.jsonl.gz": "gzip of data/claude_reference.jsonl (sha256 13e5a9b266fefb96282e9857a53e3b408146dade66ca6220fa593fdff270d8a8)"
     },
     "code": "scripts/modeltrace_build: challenge_suite.py unchanged; builder.py is a pure-Python port of bank_builder.py (tests/modeltrace_numpy keeps the originals for parity checks)",
     "use": "`nerfed enroll <model>` collects the 36-answer reference set for a model this bank lacks and rebuilds the bank in NERFED_HOME"
+  },
+  "aliases": {
+    "gpt-6.1-sol": "gpt-6-astra"
+  },
+  "supplemental_source": {
+    "source": "https://github.com/Ikaleio/lm-detector",
+    "commit": "6530eeea79bb3794bd7b0e9f1b1c180921c924b3",
+    "file": "data/unified_reference.jsonl",
+    "sha256": "eadd1d25f5232b6e4b65152b5d953d2656e4372327c2c41754486ca80f880765",
+    "license": "MIT (Copyright (c) 2026 xqy2006; same license text as LICENSE-ModelTrace.txt)",
+    "models_imported": [
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-6.1-terra",
+      "gpt-6.2-sol",
+      "gpt-6.2-astra"
+    ],
+    "aliases_added": {
+      "gpt-6.1-sol": "gpt-6-astra"
+    },
+    "note": "Post-GPT-5.6 models imported with unified low-effort 36-prompt reference batches; gpt-6.1-sol is aliased to gpt-6-astra (display_name gpt-6-astra/6.1-sol) because their fingerprints are indistinguishable."
   }
 }

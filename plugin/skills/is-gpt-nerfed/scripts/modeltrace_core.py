@@ -200,10 +200,13 @@ def analyze_global_outputs(outputs, bank) -> dict:
     results = []
     for index, model_id in enumerate(model_ids):
         family = entries[model_id].get("family") or "models"
-        results.append({"model": model_id, "display_name": entries[model_id].get("display_name") or model_id,
-                        "probability": probabilities[index],
-                        "profile_similarity": js_similarity(pooled, entries[model_id]["counts"]),
-                        "score": combined[index], "family": family, "family_name": family_names[family]})
+        row = {"model": model_id, "display_name": entries[model_id].get("display_name") or model_id,
+               "probability": probabilities[index],
+               "profile_similarity": js_similarity(pooled, entries[model_id]["counts"]),
+               "score": combined[index], "family": family, "family_name": family_names[family]}
+        if entries[model_id].get("aliases"):
+            row["aliases"] = list(entries[model_id]["aliases"])
+        results.append(row)
     results.sort(key=lambda r: r["probability"], reverse=True)
     family_probabilities = {family: sum(r["probability"] for r in results if r["family"] == family) for family in family_order}
     for r in results:
@@ -227,3 +230,17 @@ def load_bank(path) -> dict:
 
 def bank_model_ids(bank) -> list[str]:
     return [m["id"] for m in bank["models"]]
+
+
+def bank_model_aliases(bank) -> dict[str, str]:
+    """返回指纹库中声明的模型别名映射（规范化别名 -> 主模型 ID）。"""
+    aliases: dict[str, str] = {}
+    for m in bank.get("models") or []:
+        canonical = m.get("id")
+        if not canonical:
+            continue
+        for alias in m.get("aliases") or []:
+            key = str(alias or "").strip().lower()
+            if key and key != canonical.lower():
+                aliases[key] = canonical
+    return aliases

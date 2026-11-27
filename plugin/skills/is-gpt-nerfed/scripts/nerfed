@@ -674,7 +674,16 @@ def rebuild_user_bank(quiet: bool = False) -> dict | None:
         return None
     from modeltrace_build import builder
     local_ids = {r["model_id"] for r in local}
-    rows = [r for r in reference_rows() if r.get("model_id") not in local_ids] + local
+    rows = []
+    for r in reference_rows():
+        if r.get("model_id") in local_ids:
+            continue
+        if r.get("aliases"):
+            # 若用户在本地独立录入了某个别名模型，则从参考行的 aliases 中移除该冲突别名。
+            filtered = [a for a in r["aliases"] if normalize_model(a) not in local_ids]
+            r = {**r, "aliases": filtered} if filtered else {k: v for k, v in r.items() if k != "aliases"}
+        rows.append(r)
+    rows.extend(local)
     if not quiet:
         print(f"rebuilding the fingerprint bank: {len({r['model_id'] for r in rows})} models, {len(rows)} reference answers "
               f"({len(local_ids)} enrolled here) — this takes a few minutes…", flush=True)
@@ -815,16 +824,19 @@ def cmd_bank(args) -> int:
         return 0
     bank = load_bank()
     local = sorted({r["model_id"] for r in enrolled_rows()})
+    aliases = core.bank_model_aliases(bank)
     cal = bank.get("calibration", {}).get("3") or {}
     info = {"bank": USER_BANK_PATH if bank.get("local_enrollments") is not None else BANK_PATH,
-            "built_at": bank.get("built_at"), "models": core.bank_model_ids(bank), "enrolled_here": local,
-            "cv_accuracy_3": cal.get("cv_accuracy"),
+            "built_at": bank.get("built_at"), "models": core.bank_model_ids(bank), "aliases": aliases,
+            "enrolled_here": local, "cv_accuracy_3": cal.get("cv_accuracy"),
             "twins": {m: dict(enrollment_twins(bank, m)) for m in local if enrollment_twins(bank, m)}}
     if getattr(args, "json", False):
         print(json.dumps(info, ensure_ascii=False))
     else:
         print(f"bank: {info['bank']} (built {info['built_at']})")
         print("models: " + ", ".join(info["models"]))
+        if aliases:
+            print("aliases: " + ", ".join(f"{k} -> {v}" for k, v in sorted(aliases.items())))
         print("enrolled here: " + (", ".join(local) or "none"))
         if info["cv_accuracy_3"] is not None:
             print(f"3-answer cross-validated accuracy: {info['cv_accuracy_3']:.1%}")
@@ -1498,12 +1510,15 @@ def assess(expected: str | None, analysis: dict | None, hard_evidence: list[dict
     if not exp:
         out["verdict"] = "UNKNOWN"
         return out
-    exp_row = next((r for r in results if r["model"] == exp), None)
+    exp_row = next((r for r in results if normalize_model(r.get("model")) == exp), None)
+    if exp_row is None:
+        exp_row = next((r for r in results if exp in {normalize_model(a) for a in (r.get("aliases") or ())}), None)
     if exp_row is None:
         out["verdict"] = "UNLISTED"
         return out
-    out.update(p_expected=exp_row["probability"], margin=top["score"] - exp_row["score"])
-    if top["model"] == exp:
+    out.update(p_expected=exp_row["probability"], margin=top["score"] - exp_row["score"],
+               matched_via_alias=normalize_model(exp_row.get("model")) != exp)
+    if top is exp_row:
         out.update(verdict="MATCH", confidence="high" if top["probability"] >= conf else "low")
         return out
     eps = 1e-9  # 0.80 ≥ 0.8 and 0.20 ≤ 1 − 0.8 must both hold despite binary floating point
@@ -1564,11 +1579,15 @@ def finalize_probe(rec: dict, outputs: list[dict], expected: str | None, errors:
     a = assess(expected, analysis, hard, cfg)
     verdict, direction = a["verdict"], a["direction"]
     top = analysis["prediction"] if analysis else None
+    top_display = (analysis.get("prediction_name") or top) if analysis else None
+    # 通过别名匹配（如 gpt-6.1-sol -> gpt-6-astra/6.1-sol）时使用无空格的展示名，便于阅读且兼容本地化正则。
+    quote_top = (top_display if (a.get("matched_via_alias") and top_display and not any(ch.isspace() for ch in top_display))
+                 else top)
     p = analysis["probability"] if analysis else 0.0
     p_exp = a.get("p_expected") or 0.0
     n = analysis["used_outputs"] if analysis else 0
     q = int(rec.get("queries") or 1) * int(rec.get("rounds") or 1)
-    fmt = {"expected": expected or "?", "top": top or "?", "p": p, "p_exp": p_exp, "n": n, "q": q,
+    fmt = {"expected": expected or "?", "top": quote_top or "?", "p": p, "p_exp": p_exp, "n": n, "q": q,
            "detail": hard[0]["detail"] if hard else "", "reason": "; ".join(errors)[:160] or "no answers"}
     if verdict == "DOWNGRADED!":
         quote = pet_line("DOWNGRADED_HARD", seed=rec["id"], **fmt)

@@ -204,6 +204,34 @@ class LogicTests(unittest.TestCase):
         self.assertEqual(dgc.fingerprint_verdict("gpt-6-astra", None, []), ("INVALID", None))
         self.assertEqual(dgc.fingerprint_verdict("gpt-6-astra", confident, [{"detail": "x"}]), ("DOWNGRADED!", "hard"))
 
+    def test_alias_verdicts(self):
+        aliased_match = {
+            "prediction": "gpt-6-astra",
+            "prediction_name": "gpt-6-astra/6.1-sol",
+            "probability": 0.99,
+            "used_outputs": 3,
+            "results": [
+                {"model": "gpt-6-astra", "display_name": "gpt-6-astra/6.1-sol", "aliases": ["gpt-6.1-sol"], "probability": 0.99, "score": 2.1},
+                {"model": "gpt-5.6-luna", "display_name": "gpt-5.6-luna", "probability": 0.01, "score": 0.2},
+            ],
+        }
+        a = dgc.assess("gpt-6.1-sol", aliased_match, [])
+        self.assertEqual((a["verdict"], a["confidence"], a["matched_via_alias"]), ("MATCH", "high", True))
+        direct = dgc.assess("gpt-6-astra", aliased_match, [])
+        self.assertEqual((direct["verdict"], direct["matched_via_alias"]), ("MATCH", False))
+        aliased_down = {
+            "prediction": "gpt-5.6-luna",
+            "prediction_name": "gpt-5.6-luna",
+            "probability": 0.92,
+            "used_outputs": 3,
+            "results": [
+                {"model": "gpt-5.6-luna", "display_name": "gpt-5.6-luna", "probability": 0.92, "score": 1.8},
+                {"model": "gpt-6-astra", "display_name": "gpt-6-astra/6.1-sol", "aliases": ["gpt-6.1-sol"], "probability": 0.03, "score": 0.4},
+            ],
+        }
+        down = dgc.assess("gpt-6.1-sol", aliased_down, [])
+        self.assertEqual((down["verdict"], down["direction"], down["matched_via_alias"]), ("MISMATCH", "downgrade", True))
+
     def test_confidence_gate(self):
         # top candidate wins but not confidently: SUSPICIOUS, never MISMATCH
         thin = self.analysis(("gpt-5.6-sol", 0.62, 1.1), ("gpt-6-astra", 0.31, 0.9), ("gpt-5.5", 0.07, 0.2))

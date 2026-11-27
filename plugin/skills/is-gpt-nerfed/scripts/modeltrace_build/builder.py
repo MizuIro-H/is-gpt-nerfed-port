@@ -209,13 +209,18 @@ def build_bank(rows: list[dict], fallback_calibration: dict | None = None, progr
     models = []
     for model_id in model_ids:
         selected = [r for r in rows if r["source"] == model_id]
-        models.append({
-            "id": model_id, "display_name": model_id, "family": selected[0].get("family_id"),
+        display_name = next((r.get("display_name") for r in selected if r.get("display_name")), model_id)
+        aliases = sorted({a for r in selected for a in (r.get("aliases") or ()) if a and a != model_id})
+        entry = {
+            "id": model_id, "display_name": display_name, "family": selected[0].get("family_id"),
             "family_name": selected[0].get("family_name"), "response_count": len(selected),
             "valid_number_count": sum(len(r["numbers"]) for r in selected),
             "conditions": dict(Counter(r["condition_id"] for r in selected)),
             "counts": [sum(r["counts"][i] for r in selected) for i in range(core.DIMENSION)],
-        })
+        }
+        if aliases:
+            entry["aliases"] = aliases
+        models.append(entry)
     robust = fit_robust_artifacts(rows, model_ids)
     calibration = {}
     for query_count in (1, 2, 3):
